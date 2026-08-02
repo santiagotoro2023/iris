@@ -467,3 +467,54 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   activity log shows `auth.login`, `chat.message` with tools used, `settings.change`
   and `chat.delete`, each attributed to `creator`; Redis data survived a full container
   recreate. 20/20 tests pass.
+
+---
+
+## 15. Phase 2 (part 1) — Speech-to-Text
+
+- **Stated by Santiago, verbatim:**
+
+  > I dont like the selection for chats, should be a scrollable list not a drop down.
+
+  Conversations are a scrollable list panel beside the transcript, with the active one
+  marked and per-item delete. Collapses above the chat on narrow screens.
+
+- **STT is its own GPU service** (`stt/`, faster-whisper). Kept out of the API image
+  because the CUDA/cuDNN base is ~3 GB and the API has no business carrying it. Clients
+  never call it directly — everything routes through `/voice/transcribe`, same rule as
+  Ollama.
+
+- **⚠ The speech and language models do not both fit in 8 GB.** Measured 2026-08-02:
+
+  | Whisper placement | STT latency | LLM throughput | LLM split |
+  |---|---|---|---|
+  | GPU, large-v3 int8_float16 (2.2 GB) | 0.8 s | 31.9 tok/s | 20% CPU / 80% GPU |
+  | CPU, large-v3 int8 | 11.8 s | 72.7 tok/s | 100% GPU |
+
+  Neither is right in every case: GPU wins a voice turn end-to-end (~4 s vs ~13 s), CPU
+  wins text-only chat. **Resolved by releasing the speech model when idle** — default
+  300 s, configurable (`voice.stt_idle_unload`, `0` keeps it loaded). Verified the VRAM
+  is genuinely returned: 680 MiB baseline → 2253 MiB loaded → 674 MiB after the timeout.
+  Cold reload 3.1 s, warm 0.6 s.
+
+- **`large-v3`, not `medium`.** `medium int8` saves 736 MiB but mistranscribed German —
+  "Bremdeneinstellungen" for "Blendeneinstellungen". Accuracy in German is a Section 1
+  requirement, so the VRAM is worth it. Both were correct in English.
+
+- **Accuracy check (espeak-ng synthesis, so a floor not a ceiling):** English and German
+  both transcribed verbatim with correct auto language detection (de 0.979, en 0.926).
+  Swiss German remains untested — Section 1 already calls it best-effort.
+
+- **⚠ The microphone needs a secure context.** Browsers grant `getUserMedia` only on
+  `localhost` or HTTPS. Over plain-HTTP Tailscale the mic will refuse, which affects
+  Phase 5's phone app directly. Fix is `tailscale serve https`, at which point
+  `IRIS_COOKIE_SECURE=1` should also be set. Not yet configured.
+
+- **Still open in Phase 2:** TTS (blocked on the ASK USER voice-source decision),
+  openWakeWord, and turn-taking/barge-in orchestration. Push-to-talk works today.
+
+- **Verified 2026-08-02:** unauthenticated `/voice/transcribe` returns 401; authenticated
+  German and English transcriptions are verbatim; empty audio returns 400; `/voice/status`
+  reports the loaded model; the conversation list renders scrollable with the active item
+  marked; the mic button renders in the composer and reports a clear message when the
+  browser withholds microphone access. 20/20 tests pass.

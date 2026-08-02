@@ -13,7 +13,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
-DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/media
+DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/media
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -135,7 +135,19 @@ wait_for_ollama() {
     curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && return 0
     sleep 2
   done
-  die "Ollama did not come up within 120s. Check: ./setup.sh logs -> docker compose logs ollama"
+  die "Ollama did not come up within 120s. Check: docker compose logs ollama"
+}
+
+# The speech model is ~3 GB on first run; wait so the install finishes ready to use
+# rather than stalling the first recording. Non-fatal — text still works without it.
+wait_for_stt() {
+  local i
+  log "Waiting for the speech model (~3 GB on first run)..."
+  for i in $(seq 1 120); do
+    curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1 && return 0
+    sleep 5
+  done
+  warn "Speech service not ready yet; it is still downloading. Text chat works meanwhile."
 }
 
 pull_model() {
@@ -156,6 +168,7 @@ install() {
   dc up -d --build
   wait_for_ollama
   pull_model
+  wait_for_stt
   log "Done. IRiS is running."
   echo
   echo "  Settings   http://localhost:8000/"

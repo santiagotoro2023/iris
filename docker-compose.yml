@@ -42,6 +42,7 @@ services:
       OLLAMA_URL: http://ollama:11434
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
+      STT_URL: http://stt:8001
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-false}
@@ -55,6 +56,20 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
+
+  stt:
+    build: ./stt
+    restart: unless-stopped
+    devices:
+      - nvidia.com/gpu=all
+    environment:
+      STT_MODEL: ${STT_MODEL:-large-v3}
+      STT_DEVICE: ${STT_DEVICE:-cuda}
+      STT_COMPUTE: ${STT_COMPUTE:-int8_float16}
+    volumes:
+      - ./data/whisper:/models
+    ports:
+      - "127.0.0.1:8001:8001"
 
   ollama:
     image: ollama/ollama:latest

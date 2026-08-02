@@ -31,16 +31,30 @@
   </nav>
 
   <section class="view active" id="view-chat" role="tabpanel">
-    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
-      <div id="conv-picker" style="flex:1"></div>
-      <button class="ghost" id="new-chat" type="button">new</button>
-      <button class="ghost" id="del-chat" type="button">delete</button>
-    </div>
-    <div class="chat-log" id="chat-log"></div>
-    <div class="composer">
-      <textarea id="composer" rows="1" placeholder="Ask IRiS…"
-                aria-label="Message"></textarea>
-      <button class="btn" id="send" type="button">Send</button>
+    <div class="chat-wrap">
+      <aside class="conv-panel">
+        <div class="conv-head">
+          <span>Conversations</span>
+          <button class="ghost" id="new-chat" type="button">new</button>
+        </div>
+        <div class="conv-list" id="conv-list" role="list"></div>
+      </aside>
+      <div class="chat-main">
+        <div class="chat-log" id="chat-log"></div>
+        <div class="composer">
+          <button class="mic" id="mic" type="button" aria-label="Record a message"
+                  aria-pressed="false" title="Record a message">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+                 stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <rect x="9" y="3" width="6" height="11" rx="3"/>
+              <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
+            </svg>
+          </button>
+          <textarea id="composer" rows="1" placeholder="Ask IRiS…"
+                    aria-label="Message"></textarea>
+          <button class="btn" id="send" type="button">Send</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -220,41 +234,111 @@ $("#composer").addEventListener("input", e => {
 $("#new-chat").addEventListener("click", () => {
   CONV = null;
   paintChat([]);
+  document.querySelectorAll(".conv-item").forEach(n =>
+    n.setAttribute("aria-current", "false"));
   $("#composer").focus();
-});
-$("#del-chat").addEventListener("click", async () => {
-  if (!CONV) return;
-  await api(`chat/conversations/${CONV}`, {method: "DELETE"});
-  CONV = null;
-  paintChat([]);
-  loadConversations();
 });
 
 async function openConversation(id) {
   CONV = id;
   paintChat((await json(`chat/conversations/${id}`)).messages);
+  document.querySelectorAll(".conv-item").forEach(n =>
+    n.setAttribute("aria-current", String(n.dataset.id === id)));
 }
+
+/* --------------------------------------------------------------- voice -- */
+let recorder = null, chunks = [];
+
+function micState({recording = false, busy = false, disabled = false, title} = {}) {
+  const mic = $("#mic");
+  mic.setAttribute("aria-pressed", String(recording));
+  mic.classList.toggle("busy", busy);
+  mic.disabled = disabled;
+  if (title) mic.title = title;
+}
+
+$("#mic").addEventListener("click", async () => {
+  if (recorder && recorder.state === "recording") { recorder.stop(); return; }
+
+  // getUserMedia needs a secure context: localhost is fine, plain http over
+  // Tailscale is not. `tailscale serve` terminates TLS if you need it remotely.
+  if (!navigator.mediaDevices?.getUserMedia) {
+    micState({disabled: true, title: "Microphone needs https (or localhost)"});
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: true});
+  } catch (e) {
+    micState({title: "Microphone unavailable: " + e.message});
+    return;
+  }
+
+  recorder = new MediaRecorder(stream);
+  chunks = [];
+  recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+  recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    micState({recording: false, busy: true, title: "Transcribing…"});
+    try {
+      const form = new FormData();
+      form.append("audio", new Blob(chunks, {type: recorder.mimeType}), "speech.webm");
+      const r = await api("voice/transcribe", {method: "POST", body: form});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || `error ${r.status}`);
+      const box = $("#composer");
+      box.value = (box.value ? box.value + " " : "") + (data.text || "");
+      box.dispatchEvent(new Event("input"));
+      box.focus();
+      micState({busy: false, title: `Record a message (heard ${data.language})`});
+    } catch (e) {
+      micState({busy: false, title: "Transcription failed: " + e.message});
+      $("#chat-log").append(bubble("tool", "transcription failed: " + e.message));
+    }
+  };
+  recorder.start();
+  micState({recording: true, title: "Stop recording"});
+});
 
 async function loadConversations({selectLatest = false} = {}) {
   const convs = await json("chat/conversations");
-  const picker = $("#conv-picker");
-  picker.textContent = "";
+  const list = $("#conv-list");
+  list.textContent = "";
   if (!convs.length) {
-    picker.append(el("div", "key", "no conversations yet"));
+    list.append(el("div", "conv-empty", "No conversations yet."));
     return;
   }
-  // On first load the picker would otherwise name a conversation the log is not
-  // showing, so open the most recent one rather than leaving a blank transcript.
+  // On first load the list would otherwise highlight a conversation the log is
+  // not showing, so open the most recent rather than leaving a blank transcript.
   if (selectLatest && !CONV) await openConversation(convs[0].id);
 
-  picker.append(Combo({
-    options: convs.map(c => c.title),
-    value: convs.find(c => c.id === CONV)?.title ?? convs[0].title,
-    onChange: title => {
-      const hit = convs.find(c => c.title === title);
-      if (hit) openConversation(hit.id);
-    },
-  }));
+  for (const c of convs) {
+    const item = el("div", "conv-item");
+    item.setAttribute("role", "listitem");
+    item.dataset.id = c.id;
+    item.setAttribute("aria-current", String(c.id === CONV));
+
+    const open = el("button", "conv-title", c.title);
+    open.type = "button";
+    open.style.cssText = "background:none;border:0;color:inherit;font:inherit;" +
+                         "text-align:left;cursor:pointer;padding:0;min-width:0;" +
+                         "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1";
+    open.addEventListener("click", () => openConversation(c.id));
+
+    const del = el("button", "conv-del", "✕");
+    del.type = "button";
+    del.title = "Delete conversation";
+    del.setAttribute("aria-label", `Delete conversation: ${c.title}`);
+    del.addEventListener("click", async e => {
+      e.stopPropagation();
+      await api(`chat/conversations/${c.id}`, {method: "DELETE"});
+      if (CONV === c.id) { CONV = null; paintChat([]); }
+      loadConversations();
+    });
+
+    item.append(open, del);
+    list.append(item);
+  }
 }
 
 /* ------------------------------------------------------------ activity -- */

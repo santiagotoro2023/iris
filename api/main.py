@@ -20,6 +20,7 @@ import auth
 import chat
 import reasoning
 import settings
+import voice
 
 OLLAMA_URL = reasoning.OLLAMA_URL
 _tags_cache: tuple[float, list[str]] = (0.0, [])
@@ -84,7 +85,8 @@ app.include_router(auth.router)
 _gate = [Depends(_gated)]
 app.include_router(settings.router, dependencies=_gate)
 app.include_router(activity.router, dependencies=_gate)
-app.include_router(chat.router)  # its own routes depend on active_user individually
+app.include_router(chat.router)   # its own routes depend on active_user individually
+app.include_router(voice.router)  # same
 
 
 class InferRequest(BaseModel):
