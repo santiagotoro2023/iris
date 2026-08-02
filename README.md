@@ -2,13 +2,58 @@
 
 Locally-run PDA-style assistant. Build spec and phase plan: [SPEC.md](./SPEC.md).
 
-## Phase 0 — quick start
+## Install
 
+```bash
+git clone https://github.com/santiagotoro2023/iris
+cd iris
+./setup.sh
 ```
-cp .env.example .env   # edit POSTGRES_PASSWORD
-docker compose up -d
+
+That is the whole CLI story. `setup.sh` installs the NVIDIA Container Toolkit if
+missing, generates the CDI spec, adds you to the `docker` group, writes a `.env`
+with a random database password, starts every service and pulls the model.
+It is idempotent — re-run it any time to update.
+
+Everything else is configured in the UI, never on the command line.
+
+| | |
+|---|---|
+| API health | http://localhost:8000/health |
+| WebUI | not built yet — Phase 5 |
+
+## Uninstall
+
+```bash
+./setup.sh --uninstall           # stop and remove the stack, keep ./data
+./setup.sh --uninstall --purge   # also delete ./data and .env (asks first)
 ```
 
-Brings up Postgres, Qdrant, Redis, MQTT. Data persists in `./data/` (gitignored).
+`--uninstall` removes containers, images, networks and named volumes but leaves
+`./data`, which holds all of IRiS's memory — Postgres, Qdrant, downloaded models
+and media. `--purge` deletes that too, and requires typing `DELETE` to confirm.
 
-GPU containers must request the CDI device explicitly — `--device nvidia.com/gpu=all`, not `--gpus all`. See [SPEC.md §9](./SPEC.md#9-phase-0-decisions-log).
+Deliberately left alone by both: Docker itself, the NVIDIA Container Toolkit and
+`/etc/cdi/nvidia.yaml` — other software on the host may depend on them.
+
+## Services
+
+| Service | Port (localhost only) | Role |
+|---|---|---|
+| `api` | 8000 | FastAPI `/infer` — all reasoning routes through here |
+| `ollama` | 11434 | LLM serving, GPU |
+| `postgres` | 5432 | structured/event store |
+| `qdrant` | 6333 | vector memory |
+| `redis` | 6379 | session state |
+| `mqtt` | 1883 | event bus |
+
+## Notes for contributors
+
+- GPU containers must request the CDI device explicitly — `devices: ["nvidia.com/gpu=all"]`,
+  not `--gpus all`. See [SPEC.md §9](./SPEC.md#9-phase-0-decisions-log).
+- Per [SPEC.md §3.4](./SPEC.md#34-standing-rule--one-command-installuninstall-configure-in-ui),
+  anything that adds a service, volume, model or system package must update
+  **both** paths of `setup.sh` and this README in the same change.
+- Config files belong in the repo (e.g. `mosquitto/`); `./data/` is runtime state
+  only and is gitignored.
+- API tests: `docker compose run --rm api sh -c "pip install -q pytest && python -m pytest test_api.py -q"`

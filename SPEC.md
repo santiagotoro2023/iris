@@ -44,6 +44,13 @@ IRiS logs its own actions — what it accessed, when, why — visible to the use
 ### 3.3 Standing Rule — Design Ambiguity Defaults to Asking
 Any UX/design decision not explicitly resolved in this document — not just the ones already flagged — Claude Code stops and asks Santiago. This is permanent, not scoped to specific phases.
 
+### 3.4 Standing Rule — One-Command Install/Uninstall, Configure in UI
+Stated by Santiago, verbatim:
+
+> I also need you to create a setup.sh file that sets everything up on its own. There should also be a --uninstall option for the setup.sh to cleanly shut down and remove everything cleanly. This should be documented and kept up to date with the changes you make so there is never stale install or uninstall components. If anything needs to be configured it is done in the webUI of the server and / or the app, as little cli interaction for the user as possible, just the install and then move to UI.
+
+This is a **standing maintenance obligation**, not a one-time task: every phase that adds a service, volume, model, system package, or config file must update `setup.sh` (both install and uninstall paths) and its documentation in the same change. Stale install/uninstall components are a defect.
+
 ---
 
 ## 4. Locked Architecture Decisions
@@ -198,3 +205,31 @@ Any UX/design decision not explicitly resolved in this document — not just the
   **Regenerate `/etc/cdi/nvidia.yaml` after every driver update** — the spec pins driver-versioned library paths (`libcuda.so.550.163.01` etc.), so a driver bump silently breaks passthrough until it's regenerated.
 
 - **Verified 2026-08-02:** GPU enumerates inside a container (RTX 3060 Ti); all four base services up and functionally responding (Postgres accepting connections, Redis PONG, Qdrant healthz, MQTT pub/sub round-trip).
+
+- **MQTT config lives in the repo, not `./data`.** `data/` is gitignored, so a config file kept there would be missing from a fresh clone and Mosquitto 2.x would fall back to defaults (anonymous access denied). Tracked at `mosquitto/mosquitto.conf`, bind-mounted read-only. General rule: config in the repo, runtime state in `./data`.
+
+---
+
+## 10. Phase 1 Decisions Log
+
+- **`/infer` contract.** `POST /infer {messages: [...], model?: str}` → `{message, messages}`. Runs the tool-calling loop server-side and returns the full transcript including tool turns. Nothing else may talk to Ollama directly (Phase 1 requirement).
+
+- **Tool scaffold.** `api/main.py` holds a `TOOLS` registry and a `@tool(name, description, parameters)` decorator; later phases register integrations/search/vision by importing and decorating. Loop is capped at `MAX_TOOL_HOPS = 5` (returns HTTP 508). A failing or unknown tool reports the error back to the model as a tool message rather than failing the request, so the model can recover or explain. One seeded tool, `current_time` — an LLM cannot know the clock and a PDA must.
+
+- **⚠ OPEN — the model does not fit in VRAM.** Measured on stzrhws01, 2026-08-02:
+
+  | | |
+  |---|---|
+  | Model on disk | 9.0 GB (Qwen2.5-14B-Instruct Q4_K_M) |
+  | VRAM total / available | 7.8 GiB / 7.1 GiB |
+  | Layers on GPU | 32 of 49 |
+  | Split | 36% CPU / 64% GPU |
+  | Generation | **12.1 tok/s** |
+  | Prompt processing | 531 tok/s |
+
+  It works and answers correctly, but 17 layers run on CPU. At 12 tok/s a 150-token
+  reply takes ~12 s, which is likely too slow for the Phase 2 voice conversation
+  loop (barge-in, turn-taking) even though it is fine for text.
+
+  Section 5 locks this model, so changing it is Santiago's call, not Claude Code's.
+  **ASK USER** before altering the model choice.

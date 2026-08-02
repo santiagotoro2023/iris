@@ -25,11 +25,33 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
 
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      IRIS_MODEL: ${IRIS_MODEL:-qwen2.5:14b-instruct-q4_K_M}
+      IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
+    depends_on:
+      - ollama
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    devices:
+      - nvidia.com/gpu=all
+    volumes:
+      - ./data/ollama:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
   mqtt:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     volumes:
-      - ./data/mosquitto/config:/mosquitto/config
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./data/mosquitto/data:/mosquitto/data
       - ./data/mosquitto/log:/mosquitto/log
     ports:
