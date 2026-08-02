@@ -185,3 +185,16 @@ Any UX/design decision not explicitly resolved in this document — not just the
 ## 9. Phase 0 Decisions Log
 
 - **Media/data storage mount:** `./data/` under the repo root (bind-mounted into containers, gitignored). Not a separate disk/NAS mount.
+
+- **GPU passthrough — use the explicit CDI device, not `--gpus all`.** Host runs Docker 29.6.2, which resolves GPUs only through CDI. `--gpus all` makes Docker auto-detect a vendor and it guesses wrong here (`AMD CDI spec not found`) because the NVIDIA driver also creates `/dev/dri` nodes. Working form:
+
+  ```
+  docker run --rm --device nvidia.com/gpu=all <image>          # CLI
+  devices: ["nvidia.com/gpu=all"]                              # compose service
+  ```
+
+  Setup on stzrhws01: `nvidia-container-toolkit` 1.19.1-1 from NVIDIA's apt repo (not in Debian trixie), CDI spec at `/etc/cdi/nvidia.yaml` generated via `nvidia-ctk cdi generate`. Driver 550.163.01.
+
+  **Regenerate `/etc/cdi/nvidia.yaml` after every driver update** — the spec pins driver-versioned library paths (`libcuda.so.550.163.01` etc.), so a driver bump silently breaks passthrough until it's regenerated.
+
+- **Verified 2026-08-02:** GPU enumerates inside a container (RTX 3060 Ti); all four base services up and functionally responding (Postgres accepting connections, Redis PONG, Qdrant healthz, MQTT pub/sub round-trip).

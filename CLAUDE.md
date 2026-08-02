@@ -7,7 +7,7 @@ Host: stzrhws01 (RTX 3060 Ti, 8GB VRAM). Data/media volumes: `./data/` (gitignor
 **Standing rule:** any UX/design decision not explicitly resolved in SPEC.md — stop and ask, don't guess (Section 3.3). "ASK USER" callouts in SPEC.md are mandatory stops.
 
 ## Phase status
-- [x] Phase 0 — Foundation: docker-compose skeleton (Postgres/Qdrant/Redis/MQTT), .gitignore, storage path decided (see SPEC.md §9)
+- [x] Phase 0 — Foundation: docker-compose skeleton (Postgres/Qdrant/Redis/MQTT) up and verified, GPU passthrough verified, storage path decided (see SPEC.md §9)
 - [ ] Phase 1 — Core Reasoning Engine
 - [ ] Phase 1B — Configuration System
 - [ ] Phase 1C — Auth & User Management
