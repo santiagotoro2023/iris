@@ -777,3 +777,11 @@ Stated by Santiago, verbatim:
   The model therefore still has the file on later turns without it being resent, while the
   UI shows the message clean with a collapsible attachment beneath. Verified: a follow-up
   question answered from the document without the file being sent again.
+
+- **Attachments render below the message**, stacked, in a `.msg-group` wrapper rather than
+  inside the bubble. The "USER" label is gone; alignment already says who is speaking.
+
+- **`current_time` returns a spelled-out timestamp**, not ISO. The model read
+  `2026-08-03T01:44+02:00` and said "3 PM"; it now gets
+  "01:45 on Monday, 03 August 2026 (Europe/Zurich, 24-hour clock)". The clock itself was
+  always correct: host 01:44 CEST, container 23:44 UTC, same instant.

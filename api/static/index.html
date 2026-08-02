@@ -342,7 +342,9 @@ function attachmentBlock(a) {
 function bubble(role, content, attachments) {
   const m = el("div", "msg " + role);
   const head = el("div", "msg-role");
-  if (role === "assistant") {
+  if (role === "user") {
+    head.remove();            // the alignment already says who is speaking
+  } else if (role === "assistant") {
     const mark = document.createElement("img");
     mark.src = $("#brand-mark").getAttribute("src");
     mark.width = mark.height = 30;
@@ -357,11 +359,19 @@ function bubble(role, content, attachments) {
   if (role === "assistant" && (content || "").trim()) {
     addSpeakButton(head, () => body.textContent);
   }
-  m.append(head, body);
-  for (const a of attachments || []) m.append(attachmentBlock(a));
+  if (role !== "user") m.append(head);
+  m.append(body);
   m.head = head;
   m.body = body;
-  return m;
+  if (!(attachments || []).length) return m;
+
+  // Attachments belong under the message, stacked, not wedged inside it.
+  const group = el("div", "msg-group " + role);
+  group.append(m);
+  for (const a of attachments) group.append(attachmentBlock(a));
+  group.head = head;
+  group.body = body;
+  return group;
 }
 
 /* ------------------------------------------------- sentence-wise speech -- */

@@ -37,7 +37,10 @@ def tool(name: str, description: str, parameters: dict):
 @tool("current_time", "Current date and time in the user's local timezone.",
       {"type": "object", "properties": {}})
 def _current_time():
-    return datetime.now(ZoneInfo(settings.get("general.timezone"))).isoformat(timespec="seconds")
+    # An ISO string gets misread (it reported "3 PM" for 01:44), so spell it out.
+    tz = settings.get("general.timezone")
+    now = datetime.now(ZoneInfo(tz))
+    return now.strftime(f"%H:%M on %A, %d %B %Y ({tz}, 24-hour clock)")
 
 
 @tool("web_search",
