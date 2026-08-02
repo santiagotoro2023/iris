@@ -78,6 +78,21 @@ setup_gpu() {
   fi
 }
 
+setup_tailscale() {
+  if ! have tailscale; then
+    log "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sudo_ sh
+  fi
+  # Already on the tailnet? Then there is nothing interactive left to do.
+  if tailscale status >/dev/null 2>&1; then
+    log "Tailscale is connected: $(tailscale ip -4 2>/dev/null | head -1)"
+    return 0
+  fi
+  warn "Tailscale needs a one-time browser login. This is the only interactive step."
+  sudo_ tailscale up
+  log "Tailscale connected: $(tailscale ip -4 2>/dev/null | head -1)"
+}
+
 ensure_env() {
   mkdir -p "${DATA_DIRS[@]}"
   if [ -f .env ]; then
@@ -117,6 +132,7 @@ install() {
   check_prereqs
   ensure_docker_group
   setup_gpu
+  setup_tailscale
   ensure_env
   log "Building and starting services..."
   dc up -d --build
@@ -150,8 +166,9 @@ uninstall() {
   [ "$reply" = "DELETE" ] || die "Aborted — nothing was deleted."
   rm -rf data .env
   log "Purged ./data and .env."
-  echo "  Left alone deliberately: Docker itself, the NVIDIA Container Toolkit and"
-  echo "  /etc/cdi/nvidia.yaml — other software on this host may depend on them."
+  echo "  Left alone deliberately: Docker itself, the NVIDIA Container Toolkit,"
+  echo "  /etc/cdi/nvidia.yaml and Tailscale — other software on this host may"
+  echo "  depend on them, and removing Tailscale could cut your remote access."
 }
 
 # ------------------------------------------------------------------- main ----

@@ -11,9 +11,12 @@ cd iris
 ```
 
 That is the whole CLI story. `setup.sh` installs the NVIDIA Container Toolkit if
-missing, generates the CDI spec, adds you to the `docker` group, writes a `.env`
-with a random database password, starts every service and pulls the model.
-It is idempotent — re-run it any time to update.
+missing, generates the CDI spec, adds you to the `docker` group, installs and
+connects Tailscale, writes a `.env` with a random database password, starts every
+service and pulls the model. It is idempotent — re-run it any time to update.
+
+The only interactive prompt is Tailscale's one-time browser login, and it is
+skipped entirely if the host is already on the tailnet.
 
 Everything else is configured in the UI, never on the command line.
 
@@ -33,8 +36,9 @@ Everything else is configured in the UI, never on the command line.
 `./data`, which holds all of IRiS's memory — Postgres, Qdrant, downloaded models
 and media. `--purge` deletes that too, and requires typing `DELETE` to confirm.
 
-Deliberately left alone by both: Docker itself, the NVIDIA Container Toolkit and
-`/etc/cdi/nvidia.yaml` — other software on the host may depend on them.
+Deliberately left alone by both: Docker itself, the NVIDIA Container Toolkit,
+`/etc/cdi/nvidia.yaml` and Tailscale — other software on the host may depend on
+them, and removing Tailscale could cut your remote access to the machine.
 
 ## Services
 
