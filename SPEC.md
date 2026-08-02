@@ -77,7 +77,7 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
 
 ## 5. Default Technical Choices
 
-- **LLM serving:** Ollama, Qwen2.5-14B-Instruct Q4_K_M.
+- **LLM serving:** Ollama, ~~Qwen2.5-14B-Instruct Q4_K_M~~ → **`qwen3:8b`, thinking off by default** (superseded 2026-08-02 with Santiago's approval; original text kept for the record). No 14B model fits this GPU's 7.1 GiB; qwen3:8b is the only candidate that runs 100% on GPU *and* answers in under a second. Measurements and reasoning in §10.
 - **STT:** faster-whisper large-v3. **TTS:** XTTS v2/F5-TTS — voice source still open (Phase 2).
 - **Wake word:** openWakeWord, trained on "IRiS."
 - **Vector memory:** Qdrant. **Structured/event store:** Postgres. **Session state:** Redis. **Event bus:** MQTT.

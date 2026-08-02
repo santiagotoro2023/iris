@@ -11,9 +11,16 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-MODEL = os.environ.get("IRIS_MODEL", "qwen2.5:14b-instruct-q4_K_M")
+MODEL = os.environ.get("IRIS_MODEL", "qwen3:8b")
 TZ = os.environ.get("IRIS_TZ", "Europe/Zurich")
 MAX_TOOL_HOPS = 5
+
+# qwen3 reasons before answering unless told not to, which costs ~11s per turn against
+# ~0.6s with it off (SPEC.md 10). Off by default; callers raise it per request when the
+# question is worth the wait. Set IRIS_THINK to anything else to omit the flag entirely,
+# which is what non-thinking models (e.g. qwen2.5) need.
+DEFAULT_THINK = {"true": True, "false": False}.get(
+    os.environ.get("IRIS_THINK", "false").strip().lower())
 
 # name -> (ollama tool schema, callable). Later phases register integrations/search/vision here.
 TOOLS: dict[str, tuple[dict, callable]] = {}
@@ -44,26 +51,32 @@ app = FastAPI(title="IRiS")
 class InferRequest(BaseModel):
     messages: list[dict]
     model: str | None = None
+    think: bool | None = None
 
 
 @app.get("/health")
 async def health():
     async with httpx.AsyncClient(timeout=5) as c:
         r = await c.get(f"{OLLAMA_URL}/api/tags")
-    return {"ollama_ok": r.status_code == 200, "model": MODEL, "tools": sorted(TOOLS)}
+    return {"ollama_ok": r.status_code == 200, "model": MODEL,
+            "think_default": DEFAULT_THINK, "tools": sorted(TOOLS)}
 
 
 @app.post("/infer")
 async def infer(req: InferRequest):
     messages = list(req.messages)
+    think = DEFAULT_THINK if req.think is None else req.think
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):
-            r = await c.post(f"{OLLAMA_URL}/api/chat", json={
+            body = {
                 "model": req.model or MODEL,
                 "messages": messages,
                 "tools": [schema for schema, _ in TOOLS.values()],
                 "stream": False,
-            })
+            }
+            if think is not None:
+                body["think"] = think
+            r = await c.post(f"{OLLAMA_URL}/api/chat", json=body)
             if r.status_code != 200:
                 raise HTTPException(502, f"ollama: {r.text}")
 

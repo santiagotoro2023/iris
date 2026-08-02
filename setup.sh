@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-MODEL_DEFAULT="qwen2.5:14b-instruct-q4_K_M"
+MODEL_DEFAULT="qwen3:8b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/media data/mosquitto/data data/mosquitto/log)
 
@@ -57,13 +57,16 @@ setup_gpu() {
 
   if ! have nvidia-ctk; then
     log "Installing the NVIDIA Container Toolkit..."
-    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-      | sudo_ gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' \
-      | sudo_ tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-    sudo_ apt-get update -qq
-    sudo_ apt-get install -y nvidia-container-toolkit
+    if ! { curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+             | sudo_ gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+           && curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+             | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' \
+             | sudo_ tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null \
+           && sudo_ apt-get update -qq \
+           && sudo_ apt-get install -y nvidia-container-toolkit; }; then
+      warn "NVIDIA Container Toolkit install failed — IRiS will fall back to CPU (much slower)."
+      return 0
+    fi
   fi
 
   # The CDI spec pins driver-versioned library paths (libcuda.so.<driver>), so a
@@ -78,10 +81,15 @@ setup_gpu() {
   fi
 }
 
+# Remote access is a convenience, not a prerequisite — a failure here warns and
+# continues rather than aborting an otherwise working install.
 setup_tailscale() {
   if ! have tailscale; then
     log "Installing Tailscale..."
-    curl -fsSL https://tailscale.com/install.sh | sudo_ sh
+    if ! curl -fsSL https://tailscale.com/install.sh | sudo_ sh; then
+      warn "Tailscale install failed. IRiS runs fine locally; re-run setup.sh to retry."
+      return 0
+    fi
   fi
   # Already on the tailnet? Then there is nothing interactive left to do.
   if tailscale status >/dev/null 2>&1; then
@@ -89,26 +97,35 @@ setup_tailscale() {
     return 0
   fi
   warn "Tailscale needs a one-time browser login. This is the only interactive step."
-  sudo_ tailscale up
-  log "Tailscale connected: $(tailscale ip -4 2>/dev/null | head -1)"
+  if sudo_ tailscale up; then
+    log "Tailscale connected: $(tailscale ip -4 2>/dev/null | head -1)"
+  else
+    warn "Could not connect Tailscale. Run 'sudo tailscale up' later for remote access."
+  fi
+}
+
+# Add a key only if absent, so an existing .env gains new settings on upgrade
+# instead of silently missing them. Existing values are never overwritten.
+add_env() {
+  grep -qE "^$1=" .env 2>/dev/null && return 0
+  printf '%s=%s\n' "$1" "$2" >> .env
+  log "  .env: added $1"
 }
 
 ensure_env() {
   mkdir -p "${DATA_DIRS[@]}"
-  if [ -f .env ]; then
-    log "Keeping existing .env."
-    return 0
-  fi
   have openssl || die "openssl is required to generate the database password."
-  log "Generating .env with a random database password..."
-  {
-    echo "POSTGRES_USER=iris"
-    echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
-    echo "POSTGRES_DB=iris"
-    echo "IRIS_MODEL=$MODEL_DEFAULT"
-    echo "IRIS_TZ=$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
-  } > .env
+  if [ ! -f .env ]; then
+    log "Creating .env with a random database password..."
+    : > .env
+  fi
   chmod 600 .env
+  add_env POSTGRES_USER iris
+  add_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
+  add_env POSTGRES_DB iris
+  add_env IRIS_MODEL "$MODEL_DEFAULT"
+  add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
+  add_env IRIS_THINK false
 }
 
 wait_for_ollama() {
@@ -124,7 +141,7 @@ pull_model() {
   local model
   model="$(grep -E '^IRIS_MODEL=' .env | cut -d= -f2- || true)"
   model="${model:-$MODEL_DEFAULT}"
-  log "Pulling model $model (~9 GB on first run, then cached)..."
+  log "Pulling model $model (~5 GB on first run, then cached)..."
   dc exec -T ollama ollama pull "$model"
 }
 

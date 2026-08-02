@@ -42,6 +42,20 @@ them, and removing Tailscale could cut your remote access to the machine.
 
 ## Services
 
+## Reasoning
+
+`POST /infer` with `{"messages": [...]}`. Optional `model` and `think` override
+the defaults per request.
+
+```bash
+curl -X POST localhost:8000/infer -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"what time is it?"}]}'
+```
+
+The model (`qwen3:8b`) reasons before answering only when asked: `"think": true`
+buys accuracy on hard questions at roughly 40 s instead of 3 s. Default is off.
+Tools are registered with the `@tool` decorator in `api/main.py`.
+
 | Service | Port (localhost only) | Role |
 |---|---|---|
 | `api` | 8000 | FastAPI `/infer` — all reasoning routes through here |

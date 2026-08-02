@@ -30,8 +30,9 @@ services:
     restart: unless-stopped
     environment:
       OLLAMA_URL: http://ollama:11434
-      IRIS_MODEL: ${IRIS_MODEL:-qwen2.5:14b-instruct-q4_K_M}
+      IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
+      IRIS_THINK: ${IRIS_THINK:-false}
     depends_on:
       - ollama
     ports:
