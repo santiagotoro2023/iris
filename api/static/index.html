@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IRiS — Settings</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
   :root {
     --orange: #FF7A1A;
@@ -29,7 +30,8 @@
       ellipse at 50% 0%, transparent 0%, var(--bg) 75%); pointer-events: none;
   }
   main { position: relative; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-  header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .35rem; }
+  header { display: flex; align-items: center; gap: .7rem; margin-bottom: .35rem; }
+  .mark { flex: none; }
   h1 { font-size: 1.4rem; letter-spacing: .14em; text-transform: uppercase; margin: 0; }
   h1 span { color: var(--orange); }
   .sub { font-family: var(--mono); font-size: .74rem; color: var(--dim); }
@@ -73,7 +75,11 @@
 </head>
 <body>
 <main>
-  <header><h1>IR<span>i</span>S</h1><span class="sub">configuration</span></header>
+  <header>
+    <img src="logo.svg" alt="" width="38" height="38" class="mark">
+    <h1>IR<span>i</span>S</h1>
+    <span class="sub">configuration</span>
+  </header>
   <div class="hud">
     <span><span id="dot" class="dot"></span><b id="conn">connecting</b></span>
     <span>model <b id="hud-model">—</b></span>

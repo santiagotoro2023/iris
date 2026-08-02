@@ -146,6 +146,34 @@ def test_schema_exposes_registered_settings_with_titles():
     assert all("title" in spec and "default" in spec for spec in props.values())
 
 
+def test_callable_enum_is_resolved_in_the_schema():
+    """Choices that change at runtime are registered as a function, not a fixed list."""
+    settings.setting("test.dynamic", type="string", title="Dynamic",
+                     enum=lambda: ["a", "b"], default="a")
+    try:
+        assert settings.schema()["properties"]["test.dynamic"]["enum"] == ["a", "b"]
+        # and the resolved list is what validation enforces
+        r = TestClient(main.app).put("/settings/values", json={"test.dynamic": "c"})
+        assert r.status_code == 400, r.text
+    finally:
+        settings.REGISTRY.pop("test.dynamic")
+
+
+def test_every_choice_setting_offers_a_dropdown():
+    """Anything with fixed expected values must enumerate them, not ask for typing."""
+    props = settings.schema()["properties"]
+    for key in ("llm.model", "llm.think", "general.timezone"):
+        assert props[key].get("enum"), f"{key} should offer a dropdown, not free text"
+
+
+def test_model_dropdown_survives_ollama_being_down():
+    """A stopped Ollama must not empty the list and invalidate the stored value."""
+    main._tags_cache = (0.0, [])
+    with patch("httpx.get", side_effect=OSError("connection refused")):
+        choices = main._installed_models()
+    assert settings.get("llm.model") in choices
+
+
 def test_unknown_setting_is_rejected():
     r = TestClient(main.app).put("/settings/values", json={"llm.nonsense": 1})
     assert r.status_code == 400
@@ -162,11 +190,19 @@ def test_valid_change_is_persisted_and_broadcast():
     FakeConn.executed = []
     with patch.dict(settings._overrides, {}, clear=True), \
          patch.object(settings, "_connect", fake_connect):
-        r = TestClient(main.app).put("/settings/values", json={"llm.model": "qwen3:14b"})
+        r = TestClient(main.app).put("/settings/values",
+                                     json={"general.timezone": "Europe/Berlin"})
         assert r.status_code == 200, r.text
-        assert r.json()["llm.model"] == "qwen3:14b"
-        assert settings.get("llm.model") == "qwen3:14b"
+        assert r.json()["general.timezone"] == "Europe/Berlin"
+        assert settings.get("general.timezone") == "Europe/Berlin"
     assert any("INSERT INTO settings" in sql for sql, _ in FakeConn.executed)
+
+
+def test_model_not_installed_is_rejected():
+    """The dropdown only offers pulled models; the API must enforce the same."""
+    r = TestClient(main.app).put("/settings/values", json={"llm.model": "not-pulled:70b"})
+    assert r.status_code == 400, r.text
+    assert "llm.model" in r.json()["detail"]
 
 
 def test_defaults_apply_when_nothing_is_stored():

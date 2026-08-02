@@ -5,6 +5,8 @@ Runtime configuration comes from the settings service, never from a config file
 the user cannot reach (SPEC.md 3.1).
 """
 import os
+import time
+import zoneinfo
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -24,16 +26,40 @@ MAX_TOOL_HOPS = 5
 _THINK_SEED = {"true": "always", "false": "never"}.get(
     os.environ.get("IRIS_THINK", "false").strip().lower(), "model-default")
 
+_tags_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def _installed_models() -> list[str]:
+    """Models actually pulled into Ollama, so the dropdown only offers usable ones."""
+    global _tags_cache
+    now = time.monotonic()
+    if now - _tags_cache[0] > 30:  # ponytail: 30s cache; add invalidation if pulls get frequent
+        try:
+            r = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2)
+            names = sorted(m["model"] for m in r.json().get("models", []))
+        except Exception:
+            names = _tags_cache[1]  # keep the last good list rather than emptying the dropdown
+        _tags_cache = (now, names)
+    # Always include the active and default values: a stopped Ollama must never make
+    # the stored configuration fail validation.
+    return sorted({*_tags_cache[1], settings.get("llm.model"),
+                   settings.REGISTRY["llm.model"]["default"]})
+
+
 settings.setting(
-    "llm.model", type="string", default=os.environ.get("IRIS_MODEL", "qwen3:8b"),
-    title="Model", description="Ollama model tag used for reasoning.")
+    "llm.model", type="string", enum=_installed_models,
+    default=os.environ.get("IRIS_MODEL", "qwen3:8b"),
+    title="Model", description="Ollama model tag used for reasoning. "
+                               "Lists the models currently pulled on this machine.")
 settings.setting(
     "llm.think", type="string", enum=["never", "always", "model-default"],
     default=_THINK_SEED, title="Reasoning mode",
     description="Reason before answering. 'always' is far more accurate on hard "
                 "questions and far slower; 'never' keeps replies conversational.")
 settings.setting(
-    "general.timezone", type="string", default=os.environ.get("IRIS_TZ", "Europe/Zurich"),
+    "general.timezone", type="string",
+    enum=lambda: sorted(zoneinfo.available_timezones()),
+    default=os.environ.get("IRIS_TZ", "Europe/Zurich"),
     title="Timezone", description="IANA timezone used for times IRiS reports.")
 
 # name -> (ollama tool schema, callable). Later phases register integrations/search/vision here.

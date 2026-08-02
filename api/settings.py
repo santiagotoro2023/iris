@@ -35,8 +35,22 @@ def setting(key: str, **schema) -> None:
     REGISTRY[key] = schema
 
 
+def _resolve(spec: dict) -> dict:
+    """Expand a callable `enum` into its current values.
+
+    Choices that change at runtime — installed models, connected devices — are
+    registered as a function so the dropdown reflects reality at request time
+    rather than whatever was true at import.
+    """
+    if not callable(spec.get("enum")):
+        return spec
+    return {**spec, "enum": list(spec["enum"]())}
+
+
 def schema() -> dict:
-    return {"type": "object", "properties": dict(REGISTRY), "additionalProperties": False}
+    return {"type": "object",
+            "properties": {k: _resolve(v) for k, v in REGISTRY.items()},
+            "additionalProperties": False}
 
 
 def values() -> dict:

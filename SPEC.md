@@ -332,3 +332,31 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   the browser persisted to Postgres; settings survive an API restart; invalid enum rejected with
   a readable message; the `general.timezone` change measurably moved the `current_time` tool
   output from +02:00 to +12:00. No console errors.
+
+---
+
+## 12. Dropdowns Everywhere & Logo
+
+- **Stated by Santiago, verbatim:**
+
+  > I like it but i dont want to have to type in things where its not really needed in the web ui like for example timezone or model selection basically anywhere there is expected values there should be a dropdown.
+
+  **Standing rule:** any setting with a knowable set of valid values is registered with an
+  `enum` and renders as a dropdown. Free text is only acceptable where the value genuinely
+  cannot be enumerated (a person's name, a free-form prompt). This applies to every phase.
+
+- **Enums may be callables.** `settings.setting(..., enum=fn)` resolves `fn()` at request time,
+  so choices that change at runtime stay accurate: installed Ollama models, and later connected
+  audio devices, cameras, and calendars. Registered as a function, not a snapshot taken at import.
+
+- **A dropdown must never invalidate the stored value.** `_installed_models()` keeps the last
+  good list if Ollama is unreachable and always includes the active and default values, so a
+  stopped service cannot make the saved configuration fail validation. Any future dynamic enum
+  must do the same.
+
+- **Logo (Phase 9, partial).** `api/static/logo.svg` — original mark, no text, 6 iris blades
+  drawn as chords tangent to a hexagonal opening, inside a ring broken by six gaps. The gaps
+  give it the schematic quality §2 asks for and separate it from a stock camera glyph; it is an
+  independent geometric construction, not a trace of anyone else's aperture mark. Line-art in
+  Aperture-orange, legible down to 16 px, used as the header mark and the favicon.
+  Palette and typography are still Phase 9 work; the exact orange is not locked yet.
