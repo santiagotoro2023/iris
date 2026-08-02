@@ -157,10 +157,10 @@ install() {
   pull_model
   log "Done. IRiS is running."
   echo
-  echo "  API      http://localhost:8000/health"
-  echo "  WebUI    not built yet — arrives in Phase 5 (SPEC.md)"
+  echo "  Settings   http://localhost:8000/"
+  echo "  API        http://localhost:8000/health"
   echo
-  echo "  Everything else is configured in the UI, not here."
+  echo "  Everything else is configured in that UI, not here."
 }
 
 # -------------------------------------------------------------- uninstall ----

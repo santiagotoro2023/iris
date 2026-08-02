@@ -22,8 +22,8 @@ Everything else is configured in the UI, never on the command line.
 
 | | |
 |---|---|
+| Settings UI | http://localhost:8000/ |
 | API health | http://localhost:8000/health |
-| WebUI | not built yet — Phase 5 |
 
 ## Uninstall
 
@@ -41,6 +41,29 @@ Deliberately left alone by both: Docker itself, the NVIDIA Container Toolkit,
 them, and removing Tailscale could cut your remote access to the machine.
 
 ## Services
+
+## Settings
+
+Everything configurable lives at http://localhost:8000/ and is driven by a schema,
+not hand-written forms. A module registers a setting in one line:
+
+```python
+settings.setting("voice.wake_sensitivity", type="number", minimum=0, maximum=1,
+                 default=0.5, title="Wake word sensitivity")
+```
+
+…and it appears in the UI on every device automatically, with validation and
+live sync. No client-side change is needed to expose a new setting.
+
+| Endpoint | |
+|---|---|
+| `GET /settings/schema` | JSON Schema of every registered setting |
+| `GET /settings/values` | current values (defaults merged with stored overrides) |
+| `PUT /settings/values` | partial update; validates the merged result |
+| `GET /settings/stream` | server-sent events, one per change |
+
+Values persist in Postgres. Only overrides are stored, so changing a default in
+code takes effect for anything the user has not explicitly set.
 
 ## Reasoning
 

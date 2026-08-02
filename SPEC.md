@@ -288,3 +288,47 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   - Swiss German being weaker on 8B is a smaller loss than it looks: Section 1 already
     calls Swiss German best-effort *because STT cannot handle it reliably*. The LLM is
     not the bottleneck on that path.
+
+---
+
+## 11. Phase 1B Decisions Log
+
+- **Registration API.** `settings.setting(key, type=..., default=..., title=..., **json_schema)`.
+  Dotted keys (`llm.model`, `voice.wake_sensitivity`) group in the UI by prefix. A `default`
+  and a `title` are mandatory — clients render entirely from the schema, so a setting without
+  a title would appear as a bare key. Later phases register at import time; no UI work needed.
+
+- **Only overrides are stored.** The `settings` table holds a row solely for values the user
+  has actually changed. Changing a default in code therefore takes effect for everyone who
+  never touched that setting, and rows for settings no longer registered are ignored at load
+  rather than resurrecting removed config.
+
+- **Validation happens on the merged result, not the patch.** `PUT /settings/values` accepts a
+  partial update but validates `current | patch` against the whole schema, so no sequence of
+  valid-looking patches can leave the configuration in a state the schema forbids. Rejections
+  return the offending key and reason.
+
+- **Live sync is SSE, not MQTT.** MQTT is the event bus for backend modules, but browsers
+  cannot speak raw MQTT without a websocket listener and extra broker config. `/settings/stream`
+  is server-sent events — no dependency, no broker change, works through the same origin the
+  UI is already served from. Backend modules that later need change notifications should get
+  an MQTT publish added alongside; nothing needs it yet.
+
+- **Postgres, not a JSON file.** Multi-device editing is an explicit requirement (§3.1), and
+  concurrent writes to a JSON file lose updates. `jsonschema` and `psycopg[binary]` were added
+  to the API image; hand-rolling validation for an endpoint that Phase 6 will put integration
+  credentials behind is not worth the saved dependency.
+
+- **`api/static/index.html` is deliberately disposable.** Vanilla JS, no build step, ~250 lines,
+  styled per §2. Phase 5's React app replaces it. It exists because §3.4 requires configuration
+  to happen in a UI, and until Phase 5 there is no other UI.
+
+- **Env vars seed defaults only.** `IRIS_MODEL` / `IRIS_THINK` / `IRIS_TZ` set the *default* of
+  the corresponding setting; the live value always comes from the settings service. `setup.sh`
+  still needs `IRIS_MODEL` in `.env` because it decides which model to pull.
+
+- **Verified 2026-08-02:** schema renders in-browser with correct input types per JSON type;
+  a change made via `curl` appeared in an open browser with no reload (SSE); a change typed in
+  the browser persisted to Postgres; settings survive an API restart; invalid enum rejected with
+  a readable message; the `general.timezone` change measurably moved the `current_time` tool
+  output from +02:00 to +12:00. No console errors.

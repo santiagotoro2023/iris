@@ -10,6 +10,11 @@ services:
       - ./data/postgres:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -30,11 +35,15 @@ services:
     restart: unless-stopped
     environment:
       OLLAMA_URL: http://ollama:11434
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-false}
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
 

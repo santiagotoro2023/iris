@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IRiS — Settings</title>
+<style>
+  :root {
+    --orange: #FF7A1A;
+    --bg: #0e0f11;
+    --panel: #16181c;
+    --line: #2a2e35;
+    --text: #e6e8ea;
+    --dim: #8b929c;
+    --sans: "Space Grotesk", "Inter", "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; background: radial-gradient(
+      ellipse at 50% 0%, transparent 0%, var(--bg) 75%); pointer-events: none;
+  }
+  main { position: relative; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .35rem; }
+  h1 { font-size: 1.4rem; letter-spacing: .14em; text-transform: uppercase; margin: 0; }
+  h1 span { color: var(--orange); }
+  .sub { font-family: var(--mono); font-size: .74rem; color: var(--dim); }
+
+  /* HUD status readout — always visible, per SPEC 2 */
+  .hud {
+    display: flex; flex-wrap: wrap; gap: 1.25rem; font-family: var(--mono);
+    font-size: .72rem; color: var(--dim); border: 1px solid var(--line);
+    background: var(--panel); padding: .6rem .85rem; margin: 1rem 0 2rem;
+  }
+  .hud b { color: var(--text); font-weight: 500; }
+  .dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+         background: var(--dim); margin-right: .4rem; vertical-align: baseline; }
+  .dot.live { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+  .dot.down { background: #d9534f; }
+
+  section { border: 1px solid var(--line); background: var(--panel); margin-bottom: 1.25rem; }
+  section > h2 {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--orange); margin: 0; padding: .7rem .95rem; border-bottom: 1px solid var(--line);
+  }
+  .row { padding: .95rem; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  label { display: block; font-size: .92rem; margin-bottom: .2rem; }
+  .desc { font-size: .78rem; color: var(--dim); margin-bottom: .55rem; line-height: 1.45; }
+  .key { font-family: var(--mono); font-size: .68rem; color: var(--dim); }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: .5rem .6rem; background: #0b0c0e; color: var(--text);
+    border: 1px solid var(--line); font-family: var(--mono); font-size: .85rem;
+  }
+  input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--orange); }
+  :focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
+  .status { min-height: 1.1rem; font-family: var(--mono); font-size: .72rem; margin-top: .45rem; }
+  .ok { color: var(--orange); }
+  .err { color: #ff6b6b; }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot.live { animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .45; } }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>IR<span>i</span>S</h1><span class="sub">configuration</span></header>
+  <div class="hud">
+    <span><span id="dot" class="dot"></span><b id="conn">connecting</b></span>
+    <span>model <b id="hud-model">—</b></span>
+    <span>reasoning <b id="hud-think">—</b></span>
+    <span>ollama <b id="hud-ollama">—</b></span>
+  </div>
+  <div id="groups"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let SCHEMA = {}, VALUES = {};
+
+const titleOf = g => g.replace(/[-_]/g, " ");
+
+async function load() {
+  const [s, v] = await Promise.all([
+    fetch("settings/schema").then(r => r.json()),
+    fetch("settings/values").then(r => r.json()),
+  ]);
+  SCHEMA = s.properties || {};
+  VALUES = v;
+  render();
+  refreshHud();
+}
+
+function render() {
+  const groups = {};
+  for (const [key, spec] of Object.entries(SCHEMA)) {
+    const g = key.includes(".") ? key.split(".")[0] : "general";
+    (groups[g] ||= []).push([key, spec]);
+  }
+  const root = $("#groups");
+  root.textContent = "";
+  for (const [g, items] of Object.entries(groups)) {
+    const sec = document.createElement("section");
+    const h = document.createElement("h2");
+    h.textContent = titleOf(g);
+    sec.append(h);
+    for (const [key, spec] of items) sec.append(rowFor(key, spec));
+    root.append(sec);
+  }
+}
+
+function rowFor(key, spec) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const id = "f-" + key.replace(/\./g, "-");
+
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = spec.title || key;
+  row.append(label);
+
+  if (spec.description) {
+    const d = document.createElement("div");
+    d.className = "desc";
+    d.textContent = spec.description;
+    row.append(d);
+  }
+
+  let input;
+  if (spec.enum) {
+    input = document.createElement("select");
+    for (const opt of spec.enum) {
+      const o = document.createElement("option");
+      o.value = o.textContent = opt;
+      input.append(o);
+    }
+    input.value = VALUES[key];
+  } else if (spec.type === "boolean") {
+    input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!VALUES[key];
+  } else if (spec.type === "number" || spec.type === "integer") {
+    input = document.createElement("input");
+    input.type = "number";
+    if (spec.minimum !== undefined) input.min = spec.minimum;
+    if (spec.maximum !== undefined) input.max = spec.maximum;
+    if (spec.type === "integer") input.step = 1;
+    input.value = VALUES[key];
+  } else {
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = VALUES[key] ?? "";
+  }
+  input.id = id;
+
+  const status = document.createElement("div");
+  status.className = "status";
+
+  const read = () => spec.type === "boolean" ? input.checked
+    : (spec.type === "number") ? parseFloat(input.value)
+    : (spec.type === "integer") ? parseInt(input.value, 10)
+    : input.value;
+
+  let timer;
+  const commit = () => save(key, read(), status);
+  input.addEventListener("change", commit);
+  if (input.type === "text" || input.type === "number") {
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(commit, 600);
+    });
+  }
+
+  row.append(input, status);
+  const k = document.createElement("div");
+  k.className = "key";
+  k.textContent = key;
+  row.append(k);
+  return row;
+}
+
+async function save(key, value, status) {
+  status.textContent = "saving…";
+  status.className = "status";
+  const r = await fetch("settings/values", {
+    method: "PUT",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({[key]: value}),
+  });
+  if (r.ok) {
+    VALUES = await r.json();
+    status.textContent = "saved";
+    status.className = "status ok";
+    setTimeout(() => { status.textContent = ""; }, 1800);
+    refreshHud();
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = body.detail || `error ${r.status}`;
+    status.className = "status err";
+  }
+}
+
+async function refreshHud() {
+  $("#hud-model").textContent = VALUES["llm.model"] ?? "—";
+  $("#hud-think").textContent = VALUES["llm.think"] ?? "—";
+  try {
+    const h = await fetch("health").then(r => r.json());
+    $("#hud-ollama").textContent = h.ollama_ok ? "up" : "down";
+  } catch { $("#hud-ollama").textContent = "unreachable"; }
+}
+
+// Live sync across devices (SPEC 3.1)
+function listen() {
+  const es = new EventSource("settings/stream");
+  es.onopen = () => { $("#dot").className = "dot live"; $("#conn").textContent = "live"; };
+  es.onerror = () => { $("#dot").className = "dot down"; $("#conn").textContent = "reconnecting"; };
+  es.onmessage = e => {
+    Object.assign(VALUES, JSON.parse(e.data));
+    for (const [key, spec] of Object.entries(SCHEMA)) {
+      const el = document.getElementById("f-" + key.replace(/\./g, "-"));
+      if (!el || el === document.activeElement) continue;   // don't yank a field being edited
+      if (spec.type === "boolean") el.checked = !!VALUES[key];
+      else el.value = VALUES[key] ?? "";
+    }
+    refreshHud();
+  };
+}
+
+load().then(listen);
+</script>
+</body>
+</html>

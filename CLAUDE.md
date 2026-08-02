@@ -13,7 +13,7 @@ Host: stzrhws01 (RTX 3060 Ti, 8GB VRAM). Data/media volumes: `./data/` (gitignor
 ## Phase status
 - [x] Phase 0 — Foundation: docker-compose skeleton (Postgres/Qdrant/Redis/MQTT) up and verified, GPU passthrough verified, storage path decided (see SPEC.md §9)
 - [x] Phase 1 — Core Reasoning Engine: Ollama + **`qwen3:8b`** (supersedes Qwen2.5-14B — no 14B fits 7.1 GiB VRAM; see SPEC.md §10), FastAPI `/infer` wrapper, tool-calling scaffold (`api/main.py`, `TOOLS` registry), thinking off by default with per-request `think` override
-- [ ] Phase 1B — Configuration System
+- [x] Phase 1B — Configuration System: `api/settings.py` registry + service (`/settings/schema|values|stream`), Postgres-backed, SSE live sync, schema-driven UI at `/` (`api/static/index.html`). Register new settings with `settings.setting(...)` — no client work needed
 - [ ] Phase 1C — Auth & User Management
 - [ ] Phase 2 — Voice I/O
 - [ ] Phase 3 — Memory System
