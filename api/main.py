@@ -4,6 +4,7 @@ Everything routes through here — nothing talks to Ollama directly (SPEC.md Pha
 Runtime configuration comes from the settings service, never from a file the user
 cannot reach (SPEC.md 3.1).
 """
+import hashlib
 import os
 import time
 import zoneinfo
@@ -12,12 +13,14 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import activity
 import auth
 import chat
+import persona
 import reasoning
 import settings
 import voice
@@ -64,12 +67,16 @@ settings.setting(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _ASSET_VERSION
+    _ASSET_VERSION = _stamp_assets()
     await settings.init()
     await auth.init()
     await activity.init()
     await chat.init()
     yield
 
+
+_static = Path(__file__).parent / "static"
 
 app = FastAPI(title="IRiS", lifespan=lifespan)
 
@@ -119,6 +126,43 @@ async def infer(req: InferRequest, _: dict = Depends(auth.active_user)):
     return await reasoning.run(req.messages, model=req.model, think=req.think)
 
 
+_ASSET_VERSION = "dev"
+
+
+def _stamp_assets() -> str:
+    """Content hash of the shared assets, appended to their URLs.
+
+    `no-cache` only helps once a browser has revalidated at least once; a copy cached
+    before that header existed sticks around and silently runs old code (it did, and
+    it showed up as unstyled white buttons). A versioned URL is a different resource,
+    so there is nothing stale to serve.
+    """
+    digest = hashlib.md5()
+    for name in ("app.css", "app.js"):
+        path = _static / name
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:8]
+
+
+def _page(name: str) -> HTMLResponse:
+    html = (_static / name).read_text()
+    for asset in ("app.css", "app.js"):
+        html = html.replace(f'"{asset}"', f'"{asset}?v={_ASSET_VERSION}"')
+    # The shell itself is never cached, so a new version is always picked up.
+    return HTMLResponse(html, headers={"cache-control": "no-store"})
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    return _page("index.html")
+
+
+@app.get("/login.html", include_in_schema=False)
+async def login_page():
+    return _page("login.html")
+
+
 class RevalidatingStatic(StaticFiles):
     """Without an explicit Cache-Control browsers cache the shell heuristically and
     keep running old code after an update. `no-cache` still allows 304s — it only
@@ -131,6 +175,5 @@ class RevalidatingStatic(StaticFiles):
 
 
 # Mounted last so it cannot shadow the API routes above.
-_static = Path(__file__).parent / "static"
 if _static.is_dir():
     app.mount("/", RevalidatingStatic(directory=_static, html=True), name="ui")

@@ -7,7 +7,7 @@ Clients never talk to the STT service directly — everything routes through the
 API, same rule as Ollama.
 """
 import os
-
+import re
 import time
 
 import httpx
@@ -26,25 +26,32 @@ MAX_SPEAK_CHARS = 4000
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
-_speakers_cache: tuple[float, list[str]] = (0.0, [])
+_speakers_cache: tuple[str, float, list[str]] = ("", 0.0, [])
 
 
 def _tts_speakers() -> list[str]:
-    """XTTS's built-in speakers. Santiago chose option (b) — a built-in voice shaped
-    by pacing and delivery — so this list is the voice choice (SPEC.md 5)."""
+    """Voices for whichever engine is selected. Santiago chose a built-in voice rather
+    than a cloned one (SPEC.md 5), so this list is the voice choice."""
     global _speakers_cache
+    engine = (settings.get("voice.engine")
+              if "voice.engine" in settings.REGISTRY else "piper")
     now = time.monotonic()
-    if now - _speakers_cache[0] > 300:
+    if _speakers_cache[0] != engine or now - _speakers_cache[1] > 300:
         try:
-            r = httpx.get(f"{TTS_URL}/speakers", timeout=10)
-            names = sorted(r.json().get("speakers", []))
+            r = httpx.get(f"{TTS_URL}/speakers", params={"engine": engine}, timeout=30)
+            names = list(r.json().get("speakers", []))
         except Exception:
-            names = _speakers_cache[1]  # keep the last good list, never empty the dropdown
+            names = _speakers_cache[2]  # keep the last good list, never empty the dropdown
         if names:
-            _speakers_cache = (now, names)
-    current = settings.get("voice.tts_speaker") if "voice.tts_speaker" in settings.REGISTRY else None
-    return sorted({*_speakers_cache[1], *( [current] if current else [] ),
-                   os.environ.get("TTS_SPEAKER", "Daisy Studious")})
+            _speakers_cache = (engine, now, names)
+    current = (settings.get("voice.tts_speaker")
+               if "voice.tts_speaker" in settings.REGISTRY else None)
+    listed = list(_speakers_cache[2])
+    for extra in (current, os.environ.get("TTS_SPEAKER", "en_GB-jenny_dioco-medium")):
+        if extra and extra not in listed:
+            listed.append(extra)
+    # British voices first — the whole reason for offering Piper.
+    return sorted(listed, key=lambda n: (not n.startswith("en_GB"), n))
 
 settings.setting(
     "voice.stt_model", type="string",
@@ -89,17 +96,26 @@ settings.setting(
     description="Play IRiS's answers as speech automatically. You can always play an "
                 "individual reply with the speaker button.")
 settings.setting(
+    "voice.engine", type="string", enum=["piper", "xtts"],
+    default=os.environ.get("TTS_ENGINE", "piper"),
+    title="Voice engine",
+    description="piper: CPU only, ~30x realtime, has explicitly British voices, and "
+                "never competes with the language model for VRAM. xtts: more expressive "
+                "but needs 1.65 GB of GPU memory it cannot have while the language "
+                "model is loaded, so it falls back to CPU and becomes too slow to keep "
+                "up with playback.")
+settings.setting(
     "voice.tts_speaker", type="string", enum=_tts_speakers,
-    default=os.environ.get("TTS_SPEAKER", "Daisy Studious"),
+    default=os.environ.get("TTS_SPEAKER", "en_GB-jenny_dioco-medium"),
     title="Voice",
-    description="Built-in XTTS speaker. Delivery is shaped by pacing and speed rather "
-                "than by cloning a recorded voice.")
+    description="Built-in speaker for the selected engine. en_GB voices are listed "
+                "first. Use the preview button to audition one.")
 settings.setting(
     "voice.tts_language", type="string", enum=["en", "de", "fr", "it", "es"],
     default="en", title="Speaking language",
     description="XTTS renders the same voice in each supported language.")
 settings.setting(
-    "voice.tts_speed", type="number", minimum=0.5, maximum=1.5, default=1.0,
+    "voice.tts_speed", type="number", minimum=0.5, maximum=1.6, default=1.2,
     title="Speaking pace",
     description="1.0 is natural. Lower is more deliberate, higher is brisker.")
 settings.setting(
@@ -117,6 +133,65 @@ settings.setting(
 class SpeakRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_SPEAK_CHARS)
     language: str | None = None
+
+
+# Spoken text is not written text (SPEC.md 17). Markdown read aloud, "dot" for a bare
+# period, and AG/IT pronounced as words are all defects.
+_CODE_FENCE = re.compile(r"```.*?```", re.S)
+_INLINE_CODE = re.compile(r"`([^`]*)`")
+_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_EMPHASIS = re.compile(r"(\*{1,3}|_{2,3})(.+?)\1", re.S)
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
+_BULLET = re.compile(r"^\s*[-*+]\s+", re.M)
+# "1." at the start of a line is the usual source of a spoken "dot".
+_ORDERED = re.compile(r"^\s*(\d{1,2})[.)]\s+", re.M)
+_ACRONYM = re.compile(r"\b([A-Z]{2,6})\b")
+_LEFTOVER_MD = re.compile(r"[*_#>|]+")
+_WS = re.compile(r"[ \t]+")
+_BLANKS = re.compile(r"\n{2,}")
+
+
+# All-caps words that are spoken, not spelled.
+_SAID_AS_WORD = {"RAM", "LAN", "WAN", "NAS", "NATO", "NASA", "ASCII", "JSON", "SCUBA"}
+
+
+def _spell_acronym(m: re.Match) -> str:
+    """AG -> "A G", DHCP -> "D H C P", but SIDMAR and NASA stay as words.
+
+    No perfect rule exists, so: spell it if it is very short or has no vowels —
+    those are nearly always initialisms — and otherwise leave it alone.
+    """
+    word = m.group(1)
+    if word in _SAID_AS_WORD:
+        return word
+    if len(word) <= 3 or not set(word) & set("AEIOUY"):
+        return " ".join(word)
+    return word
+
+
+def speech_text(text: str) -> str:
+    """Turn a written reply into something worth listening to."""
+    text = _CODE_FENCE.sub(" ", text)
+    text = _INLINE_CODE.sub(r"\1", text)
+    text = _LINK.sub(r"\1", text)
+    for _ in range(3):                      # ***bold italic*** nests
+        text = _EMPHASIS.sub(r"\2", text)
+    text = _HEADING.sub("", text)
+    text = _BULLET.sub("", text)
+    # Read "1. Discovery" as "1, Discovery" — a pause, not the word "dot".
+    text = _ORDERED.sub(r"\1, ", text)
+    text = _LEFTOVER_MD.sub(" ", text)
+
+    text = _ACRONYM.sub(_spell_acronym, text)
+
+    text = _BLANKS.sub(". ", text)
+    text = text.replace("\n", " ")
+    text = _WS.sub(" ", text).strip()
+
+    if text and text[-1] not in ".!?…,;:":
+        text += "."
+    # XTTS clips the tail of an utterance; a trailing pause gives it room to finish.
+    return text + " …" if text else text
 
 
 @router.get("/status")
@@ -137,7 +212,8 @@ async def status(_: dict = Depends(auth.active_user)):
 @router.post("/speak")
 async def speak(body: SpeakRequest, user: dict = Depends(auth.active_user)):
     form = {
-        "text": body.text,
+        "text": speech_text(body.text),
+        "engine": settings.get("voice.engine"),
         "speaker": settings.get("voice.tts_speaker"),
         "language": body.language or settings.get("voice.tts_language"),
         "speed": str(settings.get("voice.tts_speed")),

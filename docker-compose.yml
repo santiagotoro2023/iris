@@ -78,7 +78,8 @@ services:
     devices:
       - nvidia.com/gpu=all
     environment:
-      TTS_SPEAKER: ${TTS_SPEAKER:-Daisy Studious}
+      TTS_ENGINE: ${TTS_ENGINE:-piper}
+      TTS_SPEAKER: ${TTS_SPEAKER:-en_GB-jenny_dioco-medium}
       TTS_DEVICE: ${TTS_DEVICE:-cuda}
     volumes:
       - ./data/tts:/models
@@ -90,6 +91,12 @@ services:
     restart: unless-stopped
     devices:
       - nvidia.com/gpu=all
+    environment:
+      # The voice model must be resident at the same time as the language model for
+      # per-sentence speech to overlap generation, and on 7.8 GiB they do not both fit
+      # at full precision. A quantised KV cache buys the headroom (SPEC.md 17).
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
     volumes:
       - ./data/ollama:/root/.ollama
     ports:

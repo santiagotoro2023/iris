@@ -26,35 +26,37 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true"  data-view="chat">Chat</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="conversations">Conversations</button>
     <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
   </nav>
 
   <section class="view active" id="view-chat" role="tabpanel">
-    <div class="chat-wrap">
-      <aside class="conv-panel">
-        <div class="conv-head">
-          <span>Conversations</span>
-          <button class="ghost" id="new-chat" type="button">new</button>
-        </div>
-        <div class="conv-list" id="conv-list" role="list"></div>
-      </aside>
-      <div class="chat-main">
-        <div class="chat-log" id="chat-log"></div>
-        <div class="composer">
-          <button class="mic" id="mic" type="button" aria-label="Record a message"
-                  aria-pressed="false" title="Record a message">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
-                 stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-              <rect x="9" y="3" width="6" height="11" rx="3"/>
-              <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
-            </svg>
-          </button>
-          <textarea id="composer" rows="1" placeholder="Ask IRiS…"
-                    aria-label="Message"></textarea>
-          <button class="btn" id="send" type="button">Send</button>
-        </div>
+    <div class="chat-main">
+      <div class="chat-log" id="chat-log"></div>
+      <div class="composer">
+        <button class="mic" id="mic" type="button" aria-label="Record a message"
+                aria-pressed="false" title="Record a message">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <rect x="9" y="3" width="6" height="11" rx="3"/>
+            <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
+          </svg>
+        </button>
+        <textarea id="composer" rows="1" placeholder="Ask IRiS…"
+                  aria-label="Message"></textarea>
+        <button class="btn" id="send" type="button">Send</button>
       </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-conversations" role="tabpanel">
+    <div class="conv-panel">
+      <div class="conv-head">
+        <span>Conversations</span>
+        <button class="ghost" id="new-chat" type="button">new</button>
+      </div>
+      <div class="conv-list" id="conv-list" role="list"></div>
     </div>
   </section>
 
@@ -113,6 +115,17 @@ function rowFor(key, spec) {
   } else if (spec.type === "integer" || spec.type === "number") {
     control = Stepper({value: VALUES[key], min: spec.minimum, max: spec.maximum,
                        step: spec.type === "integer" ? 1 : 0.1, onChange: commit, id});
+  } else if (spec.format === "multiline") {
+    control = el("textarea", "input multiline");
+    control.id = id;
+    control.rows = 12;
+    control.value = VALUES[key] ?? "";
+    let t;
+    control.addEventListener("input", () => {
+      clearTimeout(t);
+      t = setTimeout(() => commit(control.value), 900);
+    });
+    control.setValue = v => { control.value = v ?? ""; };
   } else {
     control = el("input", "input");
     control.type = "text";
@@ -127,7 +140,26 @@ function rowFor(key, spec) {
   }
 
   CONTROLS[key] = control;
-  row.append(control, status, el("div", "key", key));
+  row.append(control);
+
+  // Auditioning is the only way to choose a voice, so put it next to the choice.
+  if (key === "voice.tts_speaker") {
+    const preview = el("button", "ghost", "preview voice");
+    preview.type = "button";
+    preview.style.marginTop = ".5rem";
+    preview.addEventListener("click", async () => {
+      preview.disabled = true;
+      preview.textContent = "synthesising…";
+      await speakText(
+        "Certainly, Creator. Systems nominal, and I remain quietly delighted to be useful.",
+        null);
+      preview.textContent = "preview voice";
+      preview.disabled = false;
+    });
+    row.append(preview);
+  }
+
+  row.append(status, el("div", "key", key));
   return row;
 }
 
@@ -208,7 +240,17 @@ function addSpeakButton(head, getText) {
 
 function bubble(role, content) {
   const m = el("div", "msg " + role);
-  const head = el("div", "msg-role", role === "assistant" ? "IRiS" : role);
+  const head = el("div", "msg-role");
+  if (role === "assistant") {
+    const mark = document.createElement("img");
+    mark.src = "logo.svg";
+    mark.width = mark.height = 15;
+    mark.alt = "IRiS";
+    mark.className = "bubble-mark";
+    head.append(mark);
+  } else {
+    head.append(document.createTextNode(role));
+  }
   const body = el("div", "msg-body", content);
   if (role === "assistant" && (content || "").trim()) {
     addSpeakButton(head, () => body.textContent);
@@ -393,16 +435,25 @@ $("#composer").addEventListener("input", e => {
 $("#new-chat").addEventListener("click", () => {
   CONV = null;
   paintChat([]);
+  showView("chat");
   document.querySelectorAll(".conv-item").forEach(n =>
     n.setAttribute("aria-current", "false"));
   $("#composer").focus();
 });
 
-async function openConversation(id) {
+function showView(name) {
+  document.querySelectorAll(".tab").forEach(t =>
+    t.setAttribute("aria-selected", String(t.dataset.view === name)));
+  document.querySelectorAll(".view").forEach(v =>
+    v.classList.toggle("active", v.id === "view-" + name));
+}
+
+async function openConversation(id, {focusChat = false} = {}) {
   CONV = id;
   paintChat((await json(`chat/conversations/${id}`)).messages);
   document.querySelectorAll(".conv-item").forEach(n =>
     n.setAttribute("aria-current", String(n.dataset.id === id)));
+  if (focusChat) showView("chat");
 }
 
 /* --------------------------------------------------------------- voice -- */
@@ -482,7 +533,7 @@ async function loadConversations({selectLatest = false} = {}) {
     open.style.cssText = "background:none;border:0;color:inherit;font:inherit;" +
                          "text-align:left;cursor:pointer;padding:0;min-width:0;" +
                          "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1";
-    open.addEventListener("click", () => openConversation(c.id));
+    open.addEventListener("click", () => openConversation(c.id, {focusChat: true}));
 
     const del = el("button", "conv-del", "✕");
     del.type = "button";

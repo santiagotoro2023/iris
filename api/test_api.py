@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 import auth
 import main
+import persona
 import settings
+import voice
 
 # The API now requires a session. These tests exercise inference and settings logic,
 # not the auth gate — that has its own tests at the bottom of this file.
@@ -255,6 +257,51 @@ def test_model_not_installed_is_rejected():
 def test_defaults_apply_when_nothing_is_stored():
     with patch.dict(settings._overrides, {}, clear=True):
         assert settings.values()["llm.think"] == settings.REGISTRY["llm.think"]["default"]
+
+
+# ---------------------------------------------------------------- voice ----
+
+def test_spoken_text_drops_markdown():
+    """Reading "**" or a list marker aloud is a defect (SPEC.md 17)."""
+    out = voice.speech_text("1. **Discovery**: it `works`.\n2. *Offer*: see [docs](u).")
+    for junk in ("*", "#", "`", "[", "]", "1."):
+        assert junk not in out, (junk, out)
+    assert "Discovery" in out and "docs" in out
+
+
+def test_initialisms_are_spelled_but_words_are_not():
+    spelled = voice.speech_text("AG IT DHCP API CPU HTTPS")
+    for pair in ("A G", "I T", "D H C P", "A P I", "C P U", "H T T P S"):
+        assert pair in spelled, (pair, spelled)
+    # ...while pronounceable all-caps names survive intact
+    for word in ("SIDMAR", "NASA", "RAM"):
+        assert word in voice.speech_text(f"{word} is fine"), word
+    assert "IRiS" in voice.speech_text("IRiS is mixed case")
+
+
+def test_spoken_text_always_ends_with_a_pause():
+    """XTTS clips the tail of an utterance without trailing room."""
+    assert voice.speech_text("No trailing punctuation here").endswith("…")
+    assert voice.speech_text("Already punctuated!").endswith("…")
+
+
+def test_persona_is_sent_but_never_stored():
+    """Editing the persona must affect existing conversations, so it cannot be
+    frozen into the transcript (SPEC.md 17)."""
+    post = fake_ollama(text_round("hello"))
+    with patch("httpx.AsyncClient.stream", post):
+        r = TestClient(main.app).post("/infer", json={"messages": [
+            {"role": "user", "content": "hi"}]})
+    sent_roles = [m["role"] for m in post.sent[0]["messages"]]
+    assert sent_roles[0] == "system", sent_roles
+    stored_roles = [m["role"] for m in r.json()["messages"]]
+    assert "system" not in stored_roles, stored_roles
+
+
+def test_persona_refuses_the_disclaimer():
+    prompt = persona.system_message()["content"]
+    assert "just an AI" in prompt and "don't have feelings" in prompt
+    assert "Creator" in prompt
 
 
 # ----------------------------------------------------------------- auth ----

@@ -90,8 +90,12 @@ keeps it loaded permanently.
 > `tailscale serve https / http://127.0.0.1:8000` to terminate TLS, and set
 > `IRIS_COOKIE_SECURE=1` once you do.
 
-Text-to-speech runs in its own GPU service (`tts`, XTTS v2) using one of its 58
-built-in speakers — voice and pace are settings, so the choice stays reversible.
+Text-to-speech runs in its own service with two selectable engines. **Piper** is the
+default: CPU-only, 25-33x realtime, and it ships 11 explicitly British (`en_GB`) voices.
+**XTTS** is more expressive but needs 1.65 GB of VRAM it cannot have while the language
+model is loaded, so it falls back to CPU and becomes too slow to keep up with playback.
+Voice, engine and pace are all settings, with a preview button — a voice can only be
+chosen by ear.
 
 **Nothing waits for a whole response.** Text streams token by token, and speech is
 synthesised and played one sentence at a time, with the next sentence rendering while

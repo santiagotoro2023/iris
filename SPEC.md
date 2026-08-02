@@ -557,3 +557,85 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   `reasoning.run()` consumes it, so streaming and non-streaming cannot drift. Tool calls
   work mid-stream: a round that ends in tool calls executes them, emits a tool event, and
   starts the next streamed round.
+
+---
+
+## 17. Persona, Voice Quality & Visual Corrections
+
+Stated by Santiago, verbatim:
+
+> I want the voice to have a brittish accent, if possible, even if just slightly.
+> ALso as you can see in that image some icons are white and not really visible or in
+> line with the rest of the design. I also want the conversations tab to be seperate
+> from the chat. Also the voice is a bit too slow. [...] as you can see here i kind of
+> want the system to 'pretend' to have feelings, also integrate more of that GlaDOS
+> personality its barely shining through, i also want things like 'Hello, creator' and
+> 'Certainly Creator' etc. like more sentences etc. that feel like an actual
+> conversation instead of just a LLM answering, i want it to feel 'alive' yknow? Also
+> sometimes it sais things like 'dot' for '.' It also sometimes sais things weird, like
+> not quite right. at the end of sentences it kind of 'cuts off' for the last word i
+> dont know. Instead of having 'iris' at the chat bubbles it should just be the logo.
+> also redesign the logo its a bit too much like apertures, i need something original
+> but fitting with my design philosophy. The voice also sometimes sais things like 'AG'
+> as literally ag instead of A G or IT as 'it' instead of I T. [...] It also kind of
+> behaves too much like a normal LLM, as said i want more of that GlaDOS personality
+> integrated into it.
+
+**Standing rule — IRiS is a character, not a chat completion.** It addresses Santiago as
+Creator, speaks as though it has an interior life, and carries the Section 1 persona in
+every reply. "I'm just a virtual assistant, so I don't have feelings" is a defect, not a
+disclaimer. This is Phase 8 work pulled forward because the persona is what makes the
+rest feel like IRiS rather than a model behind a form.
+
+**Standing rule — spoken text is not written text.** Markdown, acronyms and bare
+punctuation must be normalised before synthesis. Reading "**" aloud, saying "dot" for a
+period, or pronouncing AG and IT as words are defects.
+
+### 17.1 Resolutions
+
+- **Persona (`api/persona.py`).** IRiS now carries a system prompt on every request that
+  forbids the "just an AI" disclaimer, gives it an interior life, has it address Santiago
+  as Creator, and prefers prose to bullet lists. It is a **setting**, so it is editable in
+  the UI and gives Phase 8's self-modification something to diff against. The prompt is
+  sent with each request but deliberately **never stored in the transcript**, so editing
+  it takes effect on existing conversations instead of being frozen in at creation.
+
+- **Spoken-text normalisation (`voice.speech_text`).** Strips code fences, inline code,
+  links, emphasis, headings and list markers; renders "1." as "1," (the source of the
+  spoken "dot"); spells initialisms but not pronounceable all-caps words; and appends a
+  trailing pause because XTTS clips the tail of an utterance. Heuristic for spelling:
+  ≤3 letters or no vowels → spell it (AG, IT, DHCP, API); otherwise leave it (SIDMAR,
+  NASA), with a small exception set. Mixed case (IRiS) is never touched.
+
+- **⚠ TTS engine changed to Piper — needs Santiago's confirmation.** Two problems forced
+  this: XTTS cannot be given a British accent reliably (its 58 speakers are unlabelled
+  and unauditionable), and it **cannot coexist with the language model**. Measured:
+
+  | | XTTS (GPU) | XTTS (CPU) | **Piper (CPU)** |
+  |---|---|---|---|
+  | VRAM | 1.65 GB | 0 | **0** |
+  | Speed | 3.4x realtime | 0.3x realtime | **25–33x realtime** |
+  | Alongside qwen3:8b | **CUDA OOM** | works, too slow | **works** |
+  | British voices | unlabelled | unlabelled | **11 explicit en_GB** |
+
+  Quantising the LLM's KV cache (`OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`)
+  recovered ~700 MB and returned qwen3:8b to 100% GPU, but XTTS still OOMs beside it.
+  Both engines ship and are selectable (`voice.engine`); Piper is the default. XTTS falls
+  back to CPU on OOM rather than failing outright. **This deviates from Section 5, which
+  names XTTS v2/F5-TTS — ASK USER to confirm.**
+
+- **Asset versioning.** `app.css`/`app.js` are served with a content-hash query and the
+  HTML shell with `no-store`. `no-cache` alone was insufficient: a copy cached *before*
+  that header existed kept being served, which is what made the icons render as unstyled
+  white boxes in Santiago's screenshot. This was a caching fault, not a styling one.
+
+- **UI.** Conversations moved to their own tab; the assistant bubble carries the logo mark
+  instead of the word "IRiS"; long-form settings (the persona prompt) render as a
+  textarea; the voice setting has a preview button, since a voice can only be chosen by
+  ear.
+
+- **⚠ Logo redesigned — needs Santiago's pick.** The aperture mark was too close to its
+  inspiration. Eight alternatives were drawn and three refined; the installed default is a
+  **silicon die** — square outline, pin ticks, central node — which is original, reads at
+  15 px, and finally uses the "in Silico" half of the name. Alternatives kept for
+  comparison: a bracket monogram and a HUD reticle.

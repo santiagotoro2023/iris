@@ -93,6 +93,11 @@ button { font: inherit; color: inherit; }
 .input::placeholder { color: #5b626c; }
 .input:focus { border-color: var(--orange); outline: none; }
 .input.invalid { border-color: var(--err); }
+.input.multiline { font-family: var(--mono); font-size: .78rem; line-height: 1.55;
+                   resize: vertical; min-height: 8rem; white-space: pre-wrap; }
+
+/* the mark stands in for the "IRiS" label on assistant bubbles */
+.bubble-mark { display: block; flex: none; }
 
 /* combobox: replaces <select> entirely */
 .combo { position: relative; }
@@ -149,18 +154,17 @@ button { font: inherit; color: inherit; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* --------------------------------------------------------------- chat --- */
-.chat-wrap { flex: 1; display: flex; gap: .9rem; min-height: 0; }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
-.conv-panel { width: 212px; flex: none; display: flex; flex-direction: column;
+.conv-panel { flex: 1; display: flex; flex-direction: column;
               border: 1px solid var(--line); background: var(--panel); min-height: 0; }
 .conv-head { display: flex; align-items: center; gap: .4rem; padding: .5rem .55rem;
              border-bottom: 1px solid var(--line); }
 .conv-head span { font-family: var(--mono); font-size: .62rem; letter-spacing: .16em;
                   text-transform: uppercase; color: var(--orange); flex: 1; }
 .conv-list { overflow-y: auto; flex: 1; min-height: 0; }
-.conv-item { display: flex; align-items: center; gap: .3rem; width: 100%;
-             padding: .5rem .55rem; border: 0; border-left: 2px solid transparent;
+.conv-item { display: flex; align-items: center; gap: .5rem; width: 100%;
+             padding: .7rem .8rem; border: 0; border-left: 2px solid transparent;
              border-bottom: 1px solid var(--line); background: none; color: var(--dim);
              font-size: .78rem; text-align: left; cursor: pointer; }
 .conv-item:hover { background: var(--panel-2); color: var(--text); }
@@ -170,6 +174,7 @@ button { font: inherit; color: inherit; }
 .conv-del { flex: none; border: 0; background: none; color: var(--dim); cursor: pointer;
             font-size: .8rem; line-height: 1; padding: .1rem .2rem; opacity: 0; }
 .conv-item:hover .conv-del, .conv-del:focus-visible { opacity: 1; }
+@media (hover: none) { .conv-del { opacity: .7; } }
 .conv-del:hover { color: var(--err); }
 .conv-empty { padding: 1.2rem .6rem; color: var(--dim); font-size: .76rem;
               text-align: center; line-height: 1.5; }
@@ -233,10 +238,6 @@ button { font: inherit; color: inherit; }
 .log-what { color: var(--orange); white-space: nowrap; }
 .log-detail { color: var(--dim); overflow-wrap: anywhere; }
 
-@media (max-width: 640px) {
-  .chat-wrap { flex-direction: column; gap: .6rem; }
-  .conv-panel { width: auto; max-height: 33vh; }
-}
 @media (max-width: 560px) {
   .hud { font-size: .65rem; gap: .7rem; }
   .msg { max-width: 92%; }

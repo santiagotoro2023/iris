@@ -12,7 +12,7 @@ RUN pip3 install --no-cache-dir --index-url https://download.pytorch.org/whl/cu1
 
 # coqui-tts is the maintained fork of the archived Coqui TTS package.
 RUN pip3 install --no-cache-dir \
-      coqui-tts==0.25.1 \
+      coqui-tts==0.25.1 piper-tts \
       fastapi==0.115.6 uvicorn==0.34.0 python-multipart==0.0.20
 
 ENV COQUI_TOS_AGREED=1

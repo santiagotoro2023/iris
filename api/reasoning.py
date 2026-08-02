@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import HTTPException
 
+import persona
 import settings
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
@@ -71,10 +72,17 @@ async def stream(messages: list[dict], model: str | None = None,
     messages = list(messages)
     think = resolve_think(think)
 
+    # IRiS is a character, not a chat completion (SPEC.md 17). The persona is sent with
+    # every request but kept OUT of the stored transcript, so editing it takes effect on
+    # existing conversations instead of being frozen in at creation time.
+    system = None
+    if not any(m.get("role") == "system" for m in messages):
+        system = persona.system_message()
+
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):
             body = {"model": model or settings.get("llm.model"),
-                    "messages": messages,
+                    "messages": ([system] + messages) if system else messages,
                     "tools": [schema for schema, _ in TOOLS.values()],
                     "stream": True}
             if think is not None:
