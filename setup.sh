@@ -158,8 +158,9 @@ install() {
   log "Done. IRiS is running."
   echo
   echo "  Settings   http://localhost:8000/"
-  echo "  API        http://localhost:8000/health"
+  echo "  API        http://localhost:8000/healthz"
   echo
+  echo "  First sign-in: creator / 1234 — you are asked to change it immediately."
   echo "  Everything else is configured in that UI, not here."
 }
 

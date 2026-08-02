@@ -360,3 +360,53 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   independent geometric construction, not a trace of anyone else's aperture mark. Line-art in
   Aperture-orange, legible down to 16 px, used as the header mark and the favicon.
   Palette and typography are still Phase 9 work; the exact orange is not locked yet.
+
+---
+
+## 13. Phase 1C Decisions Log
+
+- **scrypt from the standard library, no hashing dependency.** `hashlib.scrypt`
+  (n=2¹⁴, r=8, p=1, 16-byte random salt per password) is a proper memory-hard KDF and
+  ships with Python. Stored as `scrypt$<salt_hex>$<hash_hex>`; verification is
+  `hmac.compare_digest`. A malformed or unknown-scheme hash verifies as False rather
+  than raising, so a corrupted row cannot 500 the login endpoint.
+
+- **Sessions in Redis, reachable by cookie *or* bearer.** The web UI gets an httpOnly,
+  SameSite=Lax cookie; the Android app can send `Authorization: Bearer`. Both resolve to
+  the same `session:<token>` key, which is what makes Phase 5's cross-device handoff
+  possible — one session store, three surfaces. TTL comes from the `auth.session_hours`
+  setting, so it is configurable in the UI like everything else.
+
+- **`Secure` on the cookie is opt-in via `IRIS_COOKIE_SECURE`, default off.** Tailscale
+  carries traffic inside its own encrypted tunnel but serves plain HTTP, where a Secure
+  cookie would make login silently impossible. Turn it on only behind a real TLS
+  terminator. This is an env var rather than a UI setting on purpose: getting it wrong
+  from inside the UI would lock the user out of the UI.
+
+- **Forced password change is a gate, not a suggestion.** `current_user` authenticates;
+  `active_user` additionally refuses (403) while `must_change` is set. Every route except
+  `/auth/me`, `/auth/password` and `/auth/logout` depends on `active_user`, so the seeded
+  `1234` account genuinely cannot do anything else. Changing the password also evicts that
+  user's other sessions.
+
+- **API keys are shown once and stored as SHA-256 digests.** Keys are 256-bit random
+  strings, so a fast digest is right — scrypt would only slow down webhook verification
+  for no gain against a value that cannot be guessed. `verify_api_key` stamps `last_used_at`
+  so abandoned keys are visible. Issued here, consumed by Phase 6.
+
+- **Login lockout: 10 failures per account, 15 minutes.** The seeded password is `1234`,
+  so unbounded guessing had to be closed. Known ceiling, marked in the code: it locks
+  the *account*, so someone who knows a username can deny service for 15 minutes. Fine
+  while Tailscale is the only way in; revisit if IRiS is ever exposed more broadly.
+
+- **`/healthz` public, `/health` authenticated.** Liveness probes need an unauthenticated
+  endpoint, but the detailed one names the model and tools, so it sits behind the session.
+
+- **Verified 2026-08-02:** unauthenticated requests to `/health`, `/settings/*` and `/infer`
+  all return 401; login as `creator`/`1234` reports `must_change_password: true` and settings
+  return 403 until the password is changed; wrong current password and passwords under 8
+  characters are rejected; after the change, settings and inference return 200 and the old
+  password no longer logs in; an issued API key appears in the database only as a digest;
+  logout invalidates the session; the 10th consecutive bad password returns 429 and the
+  correct password is refused while locked. Browser: `/` redirects to the login page, and
+  `creator`/`1234` lands on the forced password-change form rather than the settings UI.

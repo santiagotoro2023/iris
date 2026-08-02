@@ -64,6 +64,10 @@
   }
   input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--orange); }
   :focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
+  #logout { background: none; border: 1px solid var(--line); color: var(--dim);
+            font-family: var(--mono); font-size: .68rem; padding: .15rem .45rem;
+            margin-left: .5rem; cursor: pointer; }
+  #logout:hover { color: var(--text); border-color: var(--dim); }
   .status { min-height: 1.1rem; font-family: var(--mono); font-size: .72rem; margin-top: .45rem; }
   .ok { color: var(--orange); }
   .err { color: #ff6b6b; }
@@ -85,6 +89,10 @@
     <span>model <b id="hud-model">—</b></span>
     <span>reasoning <b id="hud-think">—</b></span>
     <span>ollama <b id="hud-ollama">—</b></span>
+    <span style="margin-left:auto">
+      <b id="hud-user">—</b>
+      <button id="logout" type="button">sign out</button>
+    </span>
   </div>
   <div id="groups"></div>
 </main>
@@ -95,16 +103,34 @@ let SCHEMA = {}, VALUES = {};
 
 const titleOf = g => g.replace(/[-_]/g, " ");
 
+// Any 401/403 means the session is gone or a password change is owed — either way
+// the login page is where the user needs to be.
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (r.status === 401 || r.status === 403) {
+    location.href = "login.html";
+    throw new Error("unauthenticated");
+  }
+  return r;
+}
+
 async function load() {
-  const [s, v] = await Promise.all([
-    fetch("settings/schema").then(r => r.json()),
-    fetch("settings/values").then(r => r.json()),
+  const [s, v, me] = await Promise.all([
+    api("settings/schema").then(r => r.json()),
+    api("settings/values").then(r => r.json()),
+    api("auth/me").then(r => r.json()),
   ]);
   SCHEMA = s.properties || {};
   VALUES = v;
+  $("#hud-user").textContent = `${me.username} · ${me.role}`;
   render();
   refreshHud();
 }
+
+$("#logout").addEventListener("click", async () => {
+  await fetch("auth/logout", {method: "POST"});
+  location.href = "login.html";
+});
 
 function render() {
   const groups = {};
@@ -197,7 +223,7 @@ function rowFor(key, spec) {
 async function save(key, value, status) {
   status.textContent = "saving…";
   status.className = "status";
-  const r = await fetch("settings/values", {
+  const r = await api("settings/values", {
     method: "PUT",
     headers: {"content-type": "application/json"},
     body: JSON.stringify({[key]: value}),
@@ -219,7 +245,7 @@ async function refreshHud() {
   $("#hud-model").textContent = VALUES["llm.model"] ?? "—";
   $("#hud-think").textContent = VALUES["llm.think"] ?? "—";
   try {
-    const h = await fetch("health").then(r => r.json());
+    const h = await api("health").then(r => r.json());
     $("#hud-ollama").textContent = h.ollama_ok ? "up" : "down";
   } catch { $("#hud-ollama").textContent = "unreachable"; }
 }

@@ -42,6 +42,28 @@ them, and removing Tailscale could cut your remote access to the machine.
 
 ## Services
 
+## Signing in
+
+First run seeds a single account — **`creator` / `1234`** — which cannot do anything
+except change its own password until it does. Everything else in the API returns
+401 without a session and 403 while a password change is owed.
+
+| Endpoint | |
+|---|---|
+| `POST /auth/login` | sets an httpOnly cookie and returns a bearer token |
+| `POST /auth/logout` | ends the session |
+| `GET /auth/me` | current user |
+| `POST /auth/password` | change password; evicts this user's other sessions |
+| `GET/POST/DELETE /auth/users` | user management (creator/admin) |
+| `GET/POST/DELETE /auth/apikeys` | API keys for Phase 6 webhooks (creator/admin) |
+
+The web UI uses the cookie; the Android app can use `Authorization: Bearer <token>`.
+Both resolve to the same Redis session, which is what lets Phase 5 hand a conversation
+between devices. Passwords are hashed with scrypt, API keys stored as SHA-256 digests
+and shown exactly once. Ten failed logins lock an account for 15 minutes.
+
+`GET /healthz` is public and deliberately says nothing but `{"ok": true}`.
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,

@@ -13,10 +13,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import auth
 import settings
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
@@ -88,11 +89,14 @@ def _current_time():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await settings.init()
+    await auth.init()
     yield
 
 
 app = FastAPI(title="IRiS", lifespan=lifespan)
-app.include_router(settings.router)
+app.include_router(auth.router)
+# Everything below the API surface requires a logged-in user whose password is current.
+app.include_router(settings.router, dependencies=[Depends(auth.active_user)])
 
 
 class InferRequest(BaseModel):
@@ -101,8 +105,14 @@ class InferRequest(BaseModel):
     think: bool | None = None
 
 
+@app.get("/healthz")
+async def healthz():
+    """Unauthenticated liveness probe — deliberately reveals nothing about the config."""
+    return {"ok": True}
+
+
 @app.get("/health")
-async def health():
+async def health(_: dict = Depends(auth.active_user)):
     async with httpx.AsyncClient(timeout=5) as c:
         r = await c.get(f"{OLLAMA_URL}/api/tags")
     return {"ollama_ok": r.status_code == 200,
@@ -112,7 +122,7 @@ async def health():
 
 
 @app.post("/infer")
-async def infer(req: InferRequest):
+async def infer(req: InferRequest, _: dict = Depends(auth.active_user)):
     messages = list(req.messages)
     if req.think is None:
         # 'model-default' omits the flag entirely, which non-thinking models require.

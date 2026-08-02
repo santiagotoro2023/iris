@@ -5,10 +5,17 @@ Run: python -m pytest test_api.py   (or just: python test_api.py)
 import json
 from unittest.mock import patch
 
+from fastapi import Depends
 from fastapi.testclient import TestClient
 
+import auth
 import main
 import settings
+
+# The API now requires a session. These tests exercise inference and settings logic,
+# not the auth gate — that has its own tests at the bottom of this file.
+main.app.dependency_overrides[auth.active_user] = lambda: {
+    "id": 1, "username": "test", "role": "creator", "must_change": False}
 
 
 class FakeResponse:
@@ -208,6 +215,41 @@ def test_model_not_installed_is_rejected():
 def test_defaults_apply_when_nothing_is_stored():
     with patch.dict(settings._overrides, {}, clear=True):
         assert settings.values()["llm.think"] == settings.REGISTRY["llm.think"]["default"]
+
+
+# ----------------------------------------------------------------- auth ----
+
+def test_password_hash_roundtrip():
+    h = auth.hash_password("correct horse battery staple")
+    assert h.startswith("scrypt$")
+    assert "correct horse" not in h, "password must not be recoverable from the hash"
+    assert auth.verify_password("correct horse battery staple", h)
+    assert not auth.verify_password("wrong password", h)
+
+
+def test_each_hash_uses_a_fresh_salt():
+    """Identical passwords must not produce identical hashes."""
+    assert auth.hash_password("same") != auth.hash_password("same")
+
+
+def test_verify_rejects_malformed_hashes_instead_of_crashing():
+    for bad in ("", "nonsense", "scrypt$onlyonefield", "bcrypt$aa$bb", "scrypt$zz$zz"):
+        assert not auth.verify_password("anything", bad), bad
+
+
+def test_api_keys_are_stored_as_digests():
+    raw = "iris_" + "a" * 43
+    digest = auth._hash_key(raw)
+    assert digest != raw and len(digest) == 64
+
+
+def test_protected_endpoint_401s_without_a_session():
+    """Uses a client with no dependency override, so the real gate runs."""
+    from fastapi import FastAPI
+    probe = FastAPI()
+    probe.include_router(settings.router, dependencies=[Depends(auth.active_user)])
+    r = TestClient(probe).get("/settings/values")
+    assert r.status_code == 401, r.text
 
 
 if __name__ == "__main__":
