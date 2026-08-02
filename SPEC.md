@@ -263,3 +263,28 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
 
   Real trade-off is 7B (6.3× faster, fits VRAM, weaker Swiss German) vs 14B Q4
   (best language quality, 12.5 tok/s, partially on CPU).
+
+- **Qwen3 benchmark, 2026-08-02.** Section 5 predates the discovery that no 14B model
+  fits this GPU, so Qwen3 was measured on the same prompts:
+
+  | | qwen3:8b (think off) | qwen3:8b (think on) | qwen3:14b | qwen2.5:14b Q4 | qwen2.5:7b |
+  |---|---|---|---|---|---|
+  | VRAM residency | **100% GPU, 5.6 GB** | 100% GPU | 63% GPU | 64% GPU | 100% GPU, 4.7 GB |
+  | Generation | 73.8 tok/s | 67.0 tok/s | 10.7 tok/s | 12.3 tok/s | 78.3 tok/s |
+  | **Median latency** | **0.6 s** | 11.2 s | 4.7 s | 4.1 s | 1.0 s |
+  | Reasoning | 3/4 | **4/4** | 4/4 | 4/4 | 4/4 |
+  | Tool decisions | 4/4 | 4/4 | 4/4 | 4/4 | 4/4 |
+  | Language drift | none | none | none | 1 of 4 | none |
+  | Swiss German | mediocre | mediocre | **best** | good | worst |
+
+  - **`qwen3:14b` has the best Swiss German of anything tested** — it was the only model
+    to render `'bini z spaat cho'` with the correct person ("bin ich zu spät gekommen").
+    But it runs 37% on CPU at 10.7 tok/s, slower than the Qwen2.5 14B it would replace.
+  - **`qwen3:8b`'s thinking mode is a per-request flag**, not a model choice. Off: 0.6 s
+    median latency, 3/4 reasoning. On: 4/4 reasoning, 11.2 s median latency. One model,
+    one VRAM slot, latency spent only where it buys something.
+  - **Headroom matters for Phase 2.** qwen3:8b leaves ~2.8 GiB free. faster-whisper and
+    TTS can co-reside rather than forcing a model swap per voice turn.
+  - Swiss German being weaker on 8B is a smaller loss than it looks: Section 1 already
+    calls Swiss German best-effort *because STT cannot handle it reliably*. The LLM is
+    not the bottleneck on that path.
