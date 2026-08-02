@@ -233,3 +233,33 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
 
   Section 5 locks this model, so changing it is Santiago's call, not Claude Code's.
   **ASK USER** before altering the model choice.
+
+- **Model benchmark, 2026-08-02.** Three candidates, identical prompts, `temperature 0`:
+
+  | | 14B Q4_K_M | 14B Q3_K_M | 7B Q4_K_M |
+  |---|---|---|---|
+  | Size / fits 7.1 GiB VRAM | 9.0 GB / no | 7.3 GB / no | 4.7 GB / **yes** |
+  | CPU/GPU split | 36/64 | 23/77 | 0/100 |
+  | Generation | 12.5 tok/s | 18.9 tok/s | **78.3 tok/s** |
+  | Reasoning (4 problems) | 4/4 | 4/4 | 4/4 |
+  | Tool decisions (4 cases) | 4/4 | 4/4 | 4/4 |
+  | Swiss German (read, not scored) | **best** | lost "hüt", mistranslated "Grüezi" | one output was gibberish |
+  | Language drift on tool calls | rare (1 of 8) | 2 of 4 | none |
+
+  Notes that matter more than the table:
+
+  - **Reasoning is a wash.** An earlier single-shot run appeared to show 14B Q4 failing
+    an age puzzle; with an explicit answer format all three score 4/4. That first result
+    was a parsing artifact, not a capability difference.
+  - **Keyword scoring overstated Swiss German.** All three scored 3/3 automatically, but
+    reading the outputs, 7B produced `"ich gehe gehen, brutzelst du noch öffnungen im
+    laden?"` — gibberish. Judge these by reading, not by substring match.
+  - **Language drift is mitigable.** Both 14B variants sometimes emit Thai in the
+    `content` field alongside an otherwise-correct tool call. A system prompt pinning
+    the reply language takes Q3 from 2/4 to 0/4. Phase 8 adds a persona system prompt
+    anyway, so this costs nothing.
+  - **Q3_K_M is dominated** — slower than 7B, worse Swiss German than Q4, driftiest of
+    the three. Not a serious candidate.
+
+  Real trade-off is 7B (6.3× faster, fits VRAM, weaker Swiss German) vs 14B Q4
+  (best language quality, 12.5 tok/s, partially on CPU).
