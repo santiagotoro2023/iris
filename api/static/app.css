@@ -18,7 +18,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; }
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
   background-image:
@@ -34,6 +34,23 @@ body::before {
 }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+/* Scrollbars are app-drawn too. Chrome ignores ::-webkit-scrollbar once
+   scrollbar-width is set, so the standard properties are scoped to engines that
+   lack the webkit pseudo-elements (Firefox). */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border: 3px solid var(--bg);
+                            border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--orange); }
+::-webkit-scrollbar-corner { background: transparent; }
+/* Panels sit on --panel, so the thumb inset should match their background. */
+.combo-list::-webkit-scrollbar-thumb,
+.tool-result::-webkit-scrollbar-thumb,
+.conv-list::-webkit-scrollbar-thumb { border-color: var(--panel); }
 
 /* ------------------------------------------------------------ chrome ---- */
 .shell { position: relative; z-index: 1; display: flex; flex-direction: column;
@@ -171,7 +188,8 @@ button { font: inherit; color: inherit; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* --------------------------------------------------------------- chat --- */
-.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.chat-main { flex: 1; min-height: 0; display: flex; flex-direction: column;
+             min-width: 0; }
 
 .conv-panel { flex: 1; display: flex; flex-direction: column;
               border: 1px solid var(--line); background: var(--panel); min-height: 0; }
@@ -204,15 +222,30 @@ button { font: inherit; color: inherit; }
 .msg.assistant { align-self: flex-start; background: var(--panel); }
 .msg.tool { align-self: flex-start; font-family: var(--mono); font-size: .72rem;
             color: var(--dim); background: none; border-style: dashed; max-width: 100%; }
-.msg.tool.searching { border-color: var(--cool); color: var(--cool); }
+.msg.tool.searching { border-color: var(--orange); color: var(--orange); }
 .tool-line { display: flex; align-items: center; gap: .5rem; }
 .tool-detail { color: var(--dim); font-size: .68rem; margin-top: .3rem;
                white-space: pre-wrap; max-height: 7rem; overflow-y: auto; }
-.tool-sources { display: flex; flex-wrap: wrap; gap: .3rem .5rem; margin-top: .4rem; }
-.tool-source { color: var(--cool); font-size: .68rem; text-decoration: none;
-               border-bottom: 1px dotted currentColor; max-width: 22rem;
-               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-source:hover { color: var(--orange); }
+.tool-result summary { display: flex; align-items: center; gap: .45rem; cursor: pointer;
+                       list-style: none; color: var(--orange); }
+.tool-result summary::-webkit-details-marker { display: none; }
+.tool-result summary:hover { color: var(--orange); }
+.chev-sm { width: 7px; height: 7px; flex: none; border-right: 1.5px solid currentColor;
+           border-bottom: 1.5px solid currentColor;
+           transform: rotate(-45deg) translate(-1px, -1px); transition: transform .15s; }
+.tool-result[open] .chev-sm { transform: rotate(45deg) translate(-1px, -1px); }
+.sources { list-style: none; margin: .6rem 0 .1rem; padding: 0 0 0 .2rem;
+           max-height: 15rem; overflow-y: auto; display: flex; flex-direction: column;
+           gap: .55rem; }
+.sources li { border-left: 1px solid var(--line); padding-left: .6rem; }
+.src-title { display: block; color: var(--text); font-size: .74rem; text-decoration: none; }
+.src-title:hover { color: var(--orange); text-decoration: underline; }
+.src-url { color: var(--orange-dim); font-size: .64rem; overflow-wrap: anywhere; }
+.src-snip { color: var(--dim); font-size: .66rem; line-height: 1.45; margin-top: .2rem; }
+.msg-body strong { color: #fff; font-weight: 600; }
+.msg-body em { font-style: italic; color: var(--text); }
+.msg-body code { font-family: var(--mono); font-size: .84em; background: #0b0c0e;
+                 border: 1px solid var(--line); padding: 0 .25em; }
 .msg-role { display: flex; align-items: center; gap: .55rem; min-height: 30px;
             font-family: var(--mono); font-size: .62rem; letter-spacing: .14em;
             text-transform: uppercase; color: var(--dim); margin-bottom: .3rem; }
@@ -225,6 +258,19 @@ button { font: inherit; color: inherit; }
   .speak.busy { animation: pulse 1.2s ease-in-out infinite; }
 }
 .msg.assistant .msg-role { color: var(--orange); }
+#attach-bar { flex: none; display: flex; flex-wrap: wrap; gap: .4rem; }
+#attach-bar:not(:empty) { padding: .5rem 0 0; }
+.chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--line);
+        background: var(--panel); padding: .25rem .5rem; font-size: .72rem; }
+.chip-kind { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em;
+             text-transform: uppercase; color: var(--orange); }
+.chip-name { color: var(--text); max-width: 16rem; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.chip-x { border: 0; background: none; color: var(--dim); cursor: pointer;
+          font-size: .7rem; padding: 0 .1rem; }
+.chip-x:hover { color: var(--err); }
+.attachment { margin-top: .5rem; font-family: var(--mono); font-size: .7rem; }
+.attachment .src-snip { max-height: 14rem; overflow-y: auto; white-space: pre-wrap; }
 .composer { flex: none; display: flex; gap: .5rem; align-items: flex-end;
             border-top: 1px solid var(--line); padding: .7rem 0 0; background: var(--bg); }
 .composer textarea { flex: 1; resize: none; min-height: 2.5rem; max-height: 9rem;

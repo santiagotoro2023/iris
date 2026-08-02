@@ -121,7 +121,7 @@ $("#change-form").addEventListener("submit", async e => {
   e.preventDefault();
   const pw = $("#np").value, pw2 = $("#np2").value;
   const ok = [
-    mark("np", pw.length >= 8 ? "" : `too short — ${8 - pw.length} more character(s)`),
+    mark("np", pw.length >= 8 ? "" : `too short, ${8 - pw.length} more character(s)`),
     mark("np2", pw2 === pw ? "" : "passwords do not match"),
   ].every(Boolean);
   if (!ok) return;

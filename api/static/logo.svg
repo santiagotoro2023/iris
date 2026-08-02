@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="IRiS">
 <g fill="none" stroke="#FF7A1A" stroke-linecap="round" stroke-linejoin="round">
-<rect x="22.0" y="22.0" width="76" height="76" rx="10" stroke-width="3.4"/>
-<path d="M41.00 14.00L41.00 22.00" stroke-width="2.8"/>
-<path d="M41.00 98.00L41.00 106.00" stroke-width="2.8"/>
-<path d="M14.00 41.00L22.00 41.00" stroke-width="2.8"/>
-<path d="M98.00 41.00L106.00 41.00" stroke-width="2.8"/>
-<path d="M60.00 14.00L60.00 22.00" stroke-width="2.8"/>
-<path d="M60.00 98.00L60.00 106.00" stroke-width="2.8"/>
-<path d="M14.00 60.00L22.00 60.00" stroke-width="2.8"/>
-<path d="M98.00 60.00L106.00 60.00" stroke-width="2.8"/>
-<path d="M79.00 14.00L79.00 22.00" stroke-width="2.8"/>
-<path d="M79.00 98.00L79.00 106.00" stroke-width="2.8"/>
-<path d="M14.00 79.00L22.00 79.00" stroke-width="2.8"/>
-<path d="M98.00 79.00L106.00 79.00" stroke-width="2.8"/>
-<circle cx="60" cy="60" r="16" stroke-width="3.4"/>
+<rect x="23.0" y="23.0" width="74" height="74" rx="10" stroke-width="10"/>
+<path d="M41.5 12.0L41.5 23.0" stroke-width="9"/>
+<path d="M41.5 97.0L41.5 108.0" stroke-width="9"/>
+<path d="M12.0 41.5L23.0 41.5" stroke-width="9"/>
+<path d="M97.0 41.5L108.0 41.5" stroke-width="9"/>
+<path d="M60.0 12.0L60.0 23.0" stroke-width="9"/>
+<path d="M60.0 97.0L60.0 108.0" stroke-width="9"/>
+<path d="M12.0 60.0L23.0 60.0" stroke-width="9"/>
+<path d="M97.0 60.0L108.0 60.0" stroke-width="9"/>
+<path d="M78.5 12.0L78.5 23.0" stroke-width="9"/>
+<path d="M78.5 97.0L78.5 108.0" stroke-width="9"/>
+<path d="M12.0 78.5L23.0 78.5" stroke-width="9"/>
+<path d="M97.0 78.5L108.0 78.5" stroke-width="9"/>
+<circle cx="60" cy="60" r="18" stroke-width="10"/>
 </g>
-<circle cx="60" cy="60" r="5" fill="#FF7A1A"/>
+<circle cx="60" cy="60" r="9.5" fill="#FF7A1A"/>
 </svg>

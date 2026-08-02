@@ -152,6 +152,11 @@ curl -X POST localhost:8000/infer -H 'content-type: application/json' \
 Reasoning mode defaults to `model-default`, letting qwen3 decide; `never` and `always`
 are also available. Tools are registered with the `@tool` decorator in `api/reasoning.py`.
 
+**Attach an image or document** with the paperclip in the composer. Images are described
+by a local vision model, PDFs and DOCX have their text extracted. The result travels with
+the message, so IRiS still has the file on later turns without you resending it, and the
+transcript shows the attachment collapsed rather than inline.
+
 IRiS **searches rather than guesses**: a `web_search` tool backed by self-hosted SearXNG,
 which it is instructed to use for any company, person, product, place or date it is not
 certain of. The transcript shows what it is searching for while it happens, then lists the

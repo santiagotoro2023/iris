@@ -46,7 +46,18 @@
   <section class="view active" id="view-chat" role="tabpanel">
     <div class="chat-main">
       <div class="chat-log" id="chat-log"></div>
+      <div id="attach-bar"></div>
       <div class="composer">
+        <input type="file" id="file-input" hidden
+               accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
+        <button class="mic" id="attach" type="button" aria-label="Attach a file"
+                title="Attach an image or document">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+               stroke-linejoin="round">
+            <path d="M21 12.5l-8.6 8.6a5 5 0 0 1-7-7l9-9a3.3 3.3 0 0 1 4.7 4.7l-9 9a1.7 1.7 0 0 1-2.3-2.3l8.3-8.3"/>
+          </svg>
+        </button>
         <button class="mic" id="mic" type="button" aria-label="Record a message"
                 aria-pressed="false" title="Record a message">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
@@ -250,7 +261,85 @@ function addSpeakButton(head, getText) {
   return play;
 }
 
-function bubble(role, content) {
+/* Minimal inline markdown. The model still emits **bold** and `code`; showing the
+   asterisks literally looks unfinished. Built as DOM nodes, never innerHTML. */
+const INLINE = /(\*\*|__)(\S(?:[^\n]*?\S)?)\1|(?<![*\w])\*(\S(?:[^\n]*?\S)?)\*(?![*\w])|`([^`\n]+)`/g;
+
+function renderInline(text, into) {
+  into.textContent = "";
+  let last = 0, m;
+  INLINE.lastIndex = 0;
+  while ((m = INLINE.exec(text)) !== null) {
+    if (m.index > last) into.append(text.slice(last, m.index));
+    if (m[2] !== undefined) into.append(el("strong", null, m[2]));
+    else if (m[3] !== undefined) into.append(el("em", null, m[3]));
+    else into.append(el("code", null, m[4]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) into.append(text.slice(last));
+}
+
+/* The search result is collapsed by default: a one-line note you can open to see
+   every source and its URL, rather than a wall of scrape on every answer. */
+const ENTITIES = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'",
+                  "&nbsp;": " ", "&#x27;": "'"};
+const decode = s => String(s).replace(/&(amp|lt|gt|quot|nbsp|#39|#x27);/g,
+                                      m => ENTITIES[m] ?? m);
+
+function parseSources(content) {
+  const out = [];
+  for (const line of String(content).split("\n")) {
+    const m = line.match(/^- (.*?) <(.+?)>\s*$/);
+    if (m) { out.push({title: decode(m[1].trim()), url: m[2], snippet: ""}); continue; }
+    if (out.length && /^\s+\S/.test(line)) {
+      out[out.length - 1].snippet +=
+        (out[out.length - 1].snippet ? " " : "") + decode(line.trim());
+    }
+  }
+  return out;
+}
+
+function searchResult(query, content) {
+  const sources = parseSources(content);
+  const box = document.createElement("details");
+  box.className = "tool-result";
+
+  const summary = document.createElement("summary");
+  summary.append(el("span", "chev-sm"), el("span", null,
+    `Performed a web search${query ? ` for "${query}"` : ""}`
+    + `, ${sources.length} source${sources.length === 1 ? "" : "s"}`));
+  box.append(summary);
+
+  if (!sources.length) {
+    box.append(el("div", "src-snip", String(content).slice(0, 800)));
+    return box;
+  }
+  const list = el("ol", "sources");
+  for (const s of sources) {
+    const li = document.createElement("li");
+    const a = el("a", "src-title", s.title || s.url);
+    a.href = s.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    li.append(a, el("div", "src-url", s.url));
+    if (s.snippet) li.append(el("div", "src-snip", s.snippet));
+    list.append(li);
+  }
+  box.append(list);
+  return box;
+}
+
+function attachmentBlock(a) {
+  const box = document.createElement("details");
+  box.className = "tool-result attachment";
+  const summary = document.createElement("summary");
+  summary.append(el("span", "chev-sm"),
+                 el("span", null, `${a.kind}: ${a.name}`));
+  box.append(summary, el("div", "src-snip", a.text || ""));
+  return box;
+}
+
+function bubble(role, content, attachments) {
   const m = el("div", "msg " + role);
   const head = el("div", "msg-role");
   if (role === "assistant") {
@@ -263,11 +352,13 @@ function bubble(role, content) {
   } else {
     head.append(document.createTextNode(role));
   }
-  const body = el("div", "msg-body", content);
+  const body = el("div", "msg-body");
+  if (content) renderInline(content, body);
   if (role === "assistant" && (content || "").trim()) {
     addSpeakButton(head, () => body.textContent);
   }
   m.append(head, body);
+  for (const a of attachments || []) m.append(attachmentBlock(a));
   m.head = head;
   m.body = body;
   return m;
@@ -344,11 +435,23 @@ function speechPipeline() {
 function paintChat(messages) {
   const log = $("#chat-log");
   log.textContent = "";
+  let lastCalls = [];        // a stored tool turn does not carry its own arguments
   for (const m of messages) {
-    if (m.role === "user") log.append(bubble("user", m.content));
-    else if (m.role === "tool") log.append(bubble("tool", `${m.tool_name} → ${m.content}`));
-    else if (m.role === "assistant" && (m.content || "").trim())
-      log.append(bubble("assistant", m.content));
+    if (m.role === "user") {
+      log.append(bubble("user", m.content, m.attachments));
+    } else if (m.role === "tool") {
+      const b = el("div", "msg tool");
+      if (m.tool_name === "web_search") {
+        const call = lastCalls.find(c => c?.function?.name === "web_search");
+        b.append(searchResult(call?.function?.arguments?.query ?? "", m.content));
+      } else {
+        b.append(el("div", "tool-line", `${m.tool_name}: ${m.content}`));
+      }
+      log.append(b);
+    } else if (m.role === "assistant") {
+      lastCalls = m.tool_calls || [];
+      if ((m.content || "").trim()) log.append(bubble("assistant", m.content));
+    }
   }
   log.scrollTop = log.scrollHeight;
 }
@@ -357,7 +460,8 @@ function paintChat(messages) {
 async function sendMessage() {
   const box = $("#composer");
   const text = box.value.trim();
-  if (!text || BUSY) return;
+  if ((!text && !ATTACHMENTS.length) || BUSY) return;
+  const sending = ATTACHMENTS.slice();
   BUSY = true;
   $("#send").disabled = true;
   box.value = "";
@@ -365,7 +469,7 @@ async function sendMessage() {
 
   const log = $("#chat-log");
   const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-  log.append(bubble("user", text));
+  log.append(bubble("user", text, sending));
 
   const live = bubble("assistant", "");
   const spinner = el("span", "thinking");
@@ -384,7 +488,7 @@ async function sendMessage() {
       if (first) { live.body.textContent = ""; first = false; }
       const stick = atBottom();
       shown = (shown + ev.text).replace(/\s+,/g, ",");
-      live.body.textContent = shown;
+      renderInline(shown, live.body);
       if (pipeline) {
         pending += ev.text;
         const [sentences, rest] = takeSentences(pending);
@@ -393,49 +497,28 @@ async function sendMessage() {
       }
       if (stick) log.scrollTop = log.scrollHeight;
     } else if (ev.type === "tool_start") {
-      const label = ev.name === "web_search"
-        ? `searching the web: ${ev.arguments?.query ?? ""}`
-        : `running ${ev.name}`;
+      const q = ev.arguments?.query ?? "";
       const b = el("div", "msg tool searching");
+      b.dataset.query = q;
       const line = el("div", "tool-line");
       const spin = el("span", "thinking");
       spin.append(el("i"), el("i"), el("i"));
-      line.append(spin, el("span", null, label));
+      line.append(spin, el("span", null, ev.name === "web_search"
+        ? `Searching the web${q ? ` for "${q}"` : ""}` : `Running ${ev.name}`));
       b.append(line);
-      b.dataset.tool = ev.name;
       log.insertBefore(b, live);
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "tool") {
       // Replace the in-flight indicator rather than stacking a second bubble.
-      const pendingTool = [...log.querySelectorAll(".msg.tool.searching")].pop();
-      const target = pendingTool || el("div", "msg tool");
+      const pending = [...log.querySelectorAll(".msg.tool.searching")].pop();
+      const target = pending || el("div", "msg tool");
+      const query = target.dataset?.query || "";
       target.className = "msg tool";
       target.textContent = "";
-      const head = el("div", "tool-line");
-      const hits = (ev.content.match(/^- /gm) || []).length;
-      head.append(el("span", null,
-        ev.name === "web_search"
-          ? `web search, ${hits || 0} result${hits === 1 ? "" : "s"}`
-          : `${ev.name} →`));
-      if (ev.name === "web_search") {
-        // Show the sources, not the raw scrape.
-        const list = el("div", "tool-sources");
-        for (const line of ev.content.split("\n")) {
-          const m = line.match(/^- (.*?) <(.+?)>$/);
-          if (!m) continue;
-          const a = el("a", "tool-source");
-          a.href = m[2];
-          a.target = "_blank";
-          a.rel = "noopener noreferrer";
-          a.textContent = m[1] || m[2];
-          a.title = m[2];
-          list.append(a);
-        }
-        target.append(head, list);
-      } else {
-        target.append(head, el("div", "tool-detail", ev.content.slice(0, 1200)));
-      }
-      if (!pendingTool) log.insertBefore(target, live);
+      target.append(ev.name === "web_search"
+        ? searchResult(query, ev.content)
+        : el("div", "tool-line", `${ev.name}: ${ev.content.slice(0, 200)}`));
+      if (!pending) log.insertBefore(target, live);
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "done") {
       if (pipeline && pending.trim()) { pipeline.push(pending.trim()); pending = ""; }
@@ -448,9 +531,12 @@ async function sendMessage() {
   try {
     const r = await api("chat/stream", {
       method: "POST", headers: {"content-type": "application/json"},
-      body: JSON.stringify({content: text, conversation_id: CONV}),
+      body: JSON.stringify({content: text, conversation_id: CONV,
+                            attachments: ATTACHMENTS.length ? ATTACHMENTS : undefined}),
     });
     if (!r.ok || !r.body) throw new Error(`stream failed (${r.status})`);
+    ATTACHMENTS = [];
+    renderAttachBar();
 
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -509,6 +595,54 @@ async function openConversation(id, {focusChat = false} = {}) {
     n.setAttribute("aria-current", String(n.dataset.id === id)));
   if (focusChat) showView("chat");
 }
+
+/* ----------------------------------------------------------- attachments -- */
+let ATTACHMENTS = [];
+
+function renderAttachBar() {
+  const bar = $("#attach-bar");
+  bar.textContent = "";
+  for (const a of ATTACHMENTS) {
+    const chip = el("span", "chip");
+    chip.append(el("span", "chip-kind", a.kind), el("span", "chip-name", a.name));
+    const x = el("button", "chip-x", "\u2715");
+    x.type = "button";
+    x.title = "Remove";
+    x.setAttribute("aria-label", `Remove ${a.name}`);
+    x.addEventListener("click", () => {
+      ATTACHMENTS = ATTACHMENTS.filter(o => o !== a);
+      renderAttachBar();
+    });
+    chip.append(x);
+    bar.append(chip);
+  }
+}
+
+$("#attach").addEventListener("click", () => $("#file-input").click());
+$("#file-input").addEventListener("change", async e => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+
+  const pending = el("span", "chip pending");
+  const spin = el("span", "thinking");
+  spin.append(el("i"), el("i"), el("i"));
+  pending.append(spin, el("span", "chip-name", `reading ${file.name}`));
+  $("#attach-bar").append(pending);
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const r = await api("files/analyze", {method: "POST", body: form});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `error ${r.status}`);
+    ATTACHMENTS.push(data);
+    renderAttachBar();
+  } catch (err) {
+    pending.remove();
+    $("#chat-log").append(bubble("tool", `could not read ${file.name}: ${err.message}`));
+  }
+});
 
 /* --------------------------------------------------------------- voice -- */
 let recorder = null, chunks = [];
@@ -661,7 +795,9 @@ function listen() {
   SCHEMA = s.properties || {};
   VALUES = v;
   $("#user-name").textContent = me.username;
-  $("#user-role").textContent = me.role;
+  // "creator / creator" reads as a mistake; only show the role when it adds something.
+  $("#user-role").textContent =
+    me.role.toLowerCase() === me.username.toLowerCase() ? "" : me.role;
   renderSettings();
   refreshHud();
   loadConversations({selectLatest: true});

@@ -710,3 +710,70 @@ AI". Asked what it is curious about, IRiS names something specific and means it.
   The user section is a proper chip with name over role and an icon sign-out. `logo.svg`
   is now stamped with the asset hash too, which is why the favicon was still showing the
   old mark: the tab icon is cached hardest of all.
+
+---
+
+## 19. Attachments, Sources, and Chrome
+
+Stated by Santiago, verbatim:
+
+> The search indicator and the scrolling on the website have the default browser / html
+> scrollbar which is pretty ugly, make it inline with our design philosophy. I also dont
+> need to see 'everything' it found in the search, like its just a little 'Performed a
+> websearch' thing that i can click to see the full result instead of always seing the
+> full result of the search even when i might now want it. I also want that detailed view
+> of the search to have URLs in it from where it got the information so i can check the
+> sources where needed.
+>
+> Also the logo is good but make the lines ticker on the logo everywhere so its easier to
+> see and not so 'flimsy' [...] especially the favicon which has to be easily decipherable
+> as the iris logo
+>
+> Also the conversations are kept but when i click on one i want that conversation to
+> actually open up in the chat so i can continue where i left off. Also the web search
+> summary thingie is good but its blue, make it orange to fit with the rest of the design.
+> Also it sais 'creator' twice at the top where i see my user which i dont want. Is image
+> and document analysis part of a later phase? if not i want you to integrate it now
+>
+> Also i cant scroll on the chat anymore and the top bar isnt sticky to the top
+
+### 19.1 Resolutions
+
+- **Scrollbars are app-drawn.** Thin, `--line-2` thumb turning orange on hover, inset to
+  match whichever surface they sit on. Chrome ignores `::-webkit-scrollbar` once
+  `scrollbar-width` is set, so the standard properties are scoped behind
+  `@supports not selector(::-webkit-scrollbar)` for Firefox and the webkit pseudo-elements
+  drive Chrome.
+
+- **Search results are collapsed by default** to a single "Performed a web search for …,
+  N sources" line, expandable to the title, full URL and snippet of every source. Native
+  `<details>` carries the toggle and keyboard behaviour; only its marker is restyled. The
+  same component renders stored conversations, not just live ones, which was a real gap:
+  the collapse originally applied only while streaming, so reloading a conversation
+  brought the raw dump back.
+
+- **Chat scrolling regression.** `.chat-main` had `min-width: 0` but not `min-height: 0`.
+  A column flex child defaults to `min-height: auto` and refuses to shrink below its
+  content, so `.chat-log`'s overflow never engaged, the shell overflowed, and the chrome
+  scrolled off the top. Both symptoms, one cause.
+
+- **Logo.** Variant B all round, per Santiago: stroke 5.2 to 10, pins 4.2 to 9, centre dot
+  6.5 to 9.5. A separate lighter favicon cut was tried and rejected; one asset serves both.
+
+- **Inline markdown** is rendered as DOM nodes (bold, italic, code) rather than shown as
+  literal asterisks. Never `innerHTML`.
+
+- **The user chip** prints the role only when it differs from the username, so `creator`
+  no longer appears twice.
+
+- **Image and document analysis (`api/files.py`)** — Phase 6, pulled forward like web
+  search. Images go to a local VLM (`qwen2.5vl:3b`, chosen over 7b so loading it disturbs
+  the language model less on 8 GB); PDF via pypdf, DOCX via python-docx, and plain text
+  read directly. An upload becomes **text**, which then travels with the message as an
+  `attachments` field.
+
+  **Attachments are stored beside the content, not inside it.** `reasoning.for_model`
+  folds them into the prompt on every request and strips keys Ollama does not understand.
+  The model therefore still has the file on later turns without it being resent, while the
+  UI shows the message clean with a collapsible attachment beneath. Verified: a follow-up
+  question answered from the document without the file being sent again.

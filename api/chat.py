@@ -39,6 +39,19 @@ class Send(BaseModel):
     content: str = Field(min_length=1)
     conversation_id: str | None = None
     think: bool | None = None
+    # [{name, kind, text}] from /files/analyze. Stored alongside the message so the
+    # model still has the file on later turns, and the UI can show it collapsed.
+    attachments: list[dict] | None = None
+
+
+def _user_message(body: "Send") -> dict:
+    msg = {"role": "user", "content": body.content}
+    if body.attachments:
+        msg["attachments"] = [
+            {"name": a.get("name", "file"), "kind": a.get("kind", "text"),
+             "text": str(a.get("text", ""))[:40_000]}
+            for a in body.attachments]
+    return msg
 
 
 async def _load(uid: int, cid: str) -> list[dict]:
@@ -87,7 +100,7 @@ async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
     uid = user["id"]
     cid = body.conversation_id or uuid.uuid4().hex
     history = await _load(uid, cid) if body.conversation_id else []
-    history.append({"role": "user", "content": body.content})
+    history.append(_user_message(body))
     title = None if body.conversation_id else body.content.strip()[:60]
 
     async def events():
@@ -123,7 +136,7 @@ async def send(body: Send, user: dict = Depends(auth.active_user)):
     cid = body.conversation_id or uuid.uuid4().hex
     history = await _load(uid, cid) if body.conversation_id else []
 
-    history.append({"role": "user", "content": body.content})
+    history.append(_user_message(body))
     result = await reasoning.run(history, think=body.think)
 
     # run() returns the full transcript including any tool turns, so the stored

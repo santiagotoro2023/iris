@@ -74,6 +74,22 @@ def strip_dashes(text: str) -> str:
     return _EM_DASH.sub(", ", text)
 
 
+# Ollama only understands these keys; anything else we store for our own use must be
+# stripped before the request, and attachment text folded into the content.
+_MODEL_KEYS = {"role", "content", "images", "tool_calls", "tool_name", "thinking"}
+
+
+def for_model(message: dict) -> dict:
+    out = {k: v for k, v in message.items() if k in _MODEL_KEYS}
+    attachments = message.get("attachments") or []
+    if attachments:
+        blocks = "\n\n".join(
+            f"[Attached {a.get('kind', 'file')}: {a.get('name', 'file')}]\n"
+            f"{a.get('text', '')}" for a in attachments)
+        out["content"] = f"{out.get('content', '')}\n\n{blocks}".strip()
+    return out
+
+
 def resolve_think(explicit: bool | None) -> bool | None:
     if explicit is not None:
         return explicit
@@ -118,7 +134,9 @@ async def stream(messages: list[dict], model: str | None = None,
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):
             body = {"model": model or settings.get("llm.model"),
-                    "messages": ([system] + messages) if system else messages,
+                    "messages": [for_model(m)
+                                 for m in (([system] + messages) if system
+                                           else messages)],
                     "tools": [schema for schema, _ in TOOLS.values()],
                     "stream": True}
             if think is not None:

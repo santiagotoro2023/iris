@@ -20,6 +20,7 @@ from pydantic import BaseModel
 import activity
 import auth
 import chat
+import files
 import persona
 import reasoning
 import settings
@@ -94,6 +95,7 @@ app.include_router(settings.router, dependencies=_gate)
 app.include_router(activity.router, dependencies=_gate)
 app.include_router(chat.router)   # its own routes depend on active_user individually
 app.include_router(voice.router)  # same
+app.include_router(files.router)  # same
 
 
 class InferRequest(BaseModel):
