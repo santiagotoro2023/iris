@@ -164,11 +164,127 @@ async function save(key, value, status) {
 }
 
 /* ---------------------------------------------------------------- chat -- */
+const SPEAKER_ICON =
+  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 0 1 0 6"/></svg>';
+
+let currentAudio = null;
+
+async function speakText(text, btn) {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  btn?.classList.add("busy");
+  try {
+    const r = await api("voice/speak", {
+      method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({text}),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || `error ${r.status}`);
+    }
+    const url = URL.createObjectURL(await r.blob());
+    currentAudio = new Audio(url);
+    const done = () => { btn?.classList.remove("busy"); URL.revokeObjectURL(url); };
+    currentAudio.onended = done;
+    currentAudio.onerror = done;
+    await currentAudio.play();
+  } catch (e) {
+    btn?.classList.remove("busy");
+    if (btn) btn.title = "Speech failed: " + e.message;
+  }
+}
+
+function addSpeakButton(head, getText) {
+  const play = el("button", "speak");
+  play.type = "button";
+  play.innerHTML = SPEAKER_ICON;
+  play.title = "Play this reply";
+  play.setAttribute("aria-label", "Play this reply as speech");
+  play.addEventListener("click", () => speakText(getText(), play));
+  head.append(play);
+  return play;
+}
+
 function bubble(role, content) {
   const m = el("div", "msg " + role);
-  m.append(el("div", "msg-role", role === "assistant" ? "IRiS" : role));
-  m.append(el("div", null, content));
+  const head = el("div", "msg-role", role === "assistant" ? "IRiS" : role);
+  const body = el("div", "msg-body", content);
+  if (role === "assistant" && (content || "").trim()) {
+    addSpeakButton(head, () => body.textContent);
+  }
+  m.append(head, body);
+  m.head = head;
+  m.body = body;
   return m;
+}
+
+/* ------------------------------------------------- sentence-wise speech -- */
+/* Synthesise and play one sentence at a time, so the next renders while the
+   current plays and nothing waits for the whole reply (SPEC.md 16). */
+const SENTENCE_END = /^([\s\S]*?[.!?…]+["')\]]*)(\s+)/;
+const MIN_SENTENCE = 12;
+
+function takeSentences(buffer) {
+  const out = [];
+  let rest = buffer, m;
+  while ((m = SENTENCE_END.exec(rest))) {
+    const sentence = m[1].trim();
+    // Too-short fragments ("Dr.", "3.5 ") are held back and merged with what follows.
+    if (sentence.length < MIN_SENTENCE) break;
+    out.push(sentence);
+    rest = rest.slice(m[0].length);
+  }
+  return [out, rest];
+}
+
+async function synthesise(text) {
+  const r = await api("voice/speak", {
+    method: "POST", headers: {"content-type": "application/json"},
+    body: JSON.stringify({text}),
+  });
+  if (!r.ok) return null;
+  return URL.createObjectURL(await r.blob());
+}
+
+function playUrl(url) {
+  return new Promise(resolve => {
+    currentAudio = new Audio(url);
+    const done = () => { URL.revokeObjectURL(url); resolve(); };
+    currentAudio.onended = done;
+    currentAudio.onerror = done;
+    currentAudio.play().catch(done);
+  });
+}
+
+function speechPipeline() {
+  const queue = [];
+  let draining = false, stopped = false;
+
+  async function drain() {
+    if (draining) return;
+    draining = true;
+    while (queue.length && !stopped) {
+      try {
+        const url = await queue.shift();
+        if (url && !stopped) await playUrl(url);
+      } catch { /* one bad sentence must not kill the rest */ }
+    }
+    draining = false;
+  }
+
+  return {
+    push(sentence) {
+      if (stopped || !sentence.trim()) return;
+      queue.push(synthesise(sentence));   // starts now; playback stays in order
+      drain();
+    },
+    stop() {
+      stopped = true;
+      queue.length = 0;
+      if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    },
+  };
 }
 
 function paintChat(messages) {
@@ -183,14 +299,6 @@ function paintChat(messages) {
   log.scrollTop = log.scrollHeight;
 }
 
-function thinkingBubble() {
-  const m = el("div", "msg assistant");
-  m.append(el("div", "msg-role", "IRiS"));
-  const t = el("div", "thinking");
-  t.append(el("i"), el("i"), el("i"));
-  m.append(t);
-  return m;
-}
 
 async function sendMessage() {
   const box = $("#composer");
@@ -202,20 +310,71 @@ async function sendMessage() {
   box.style.height = "auto";
 
   const log = $("#chat-log");
+  const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   log.append(bubble("user", text));
-  const pending = thinkingBubble();
-  log.append(pending);
+
+  const live = bubble("assistant", "");
+  const spinner = el("span", "thinking");
+  spinner.append(el("i"), el("i"), el("i"));
+  live.body.append(spinner);
+  log.append(live);
   log.scrollTop = log.scrollHeight;
 
+  const pipeline = VALUES["voice.speak_replies"] ? speechPipeline() : null;
+  let shown = "", pending = "", first = true;
+
+  const onEvent = ev => {
+    if (ev.type === "start") {
+      CONV = ev.conversation_id;
+    } else if (ev.type === "delta") {
+      if (first) { live.body.textContent = ""; first = false; }
+      const stick = atBottom();
+      shown += ev.text;
+      live.body.textContent = shown;
+      if (pipeline) {
+        pending += ev.text;
+        const [sentences, rest] = takeSentences(pending);
+        pending = rest;
+        sentences.forEach(s => pipeline.push(s));
+      }
+      if (stick) log.scrollTop = log.scrollHeight;
+    } else if (ev.type === "tool") {
+      log.insertBefore(bubble("tool", `${ev.name} → ${ev.content}`), live);
+      log.scrollTop = log.scrollHeight;
+    } else if (ev.type === "done") {
+      if (pipeline && pending.trim()) { pipeline.push(pending.trim()); pending = ""; }
+      if (shown.trim()) addSpeakButton(live.head, () => live.body.textContent);
+    } else if (ev.type === "error") {
+      throw new Error(ev.detail);
+    }
+  };
+
   try {
-    const r = await send("chat/message", {content: text, conversation_id: CONV});
-    CONV = r.conversation_id;
-    paintChat(r.messages);
+    const r = await api("chat/stream", {
+      method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({content: text, conversation_id: CONV}),
+    });
+    if (!r.ok || !r.body) throw new Error(`stream failed (${r.status})`);
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let partial = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      partial += decoder.decode(value, {stream: true});
+      const lines = partial.split("\n");
+      partial = lines.pop();          // last piece may be an incomplete line
+      for (const line of lines) {
+        if (line.trim()) onEvent(JSON.parse(line));
+      }
+    }
+    if (partial.trim()) onEvent(JSON.parse(partial));
     loadConversations();
   } catch (e) {
-    pending.remove();
-    const err = bubble("tool", "error: " + e.message);
-    log.append(err);
+    pipeline?.stop();
+    if (first) live.remove();
+    log.append(bubble("tool", "error: " + e.message));
   } finally {
     BUSY = false;
     $("#send").disabled = false;

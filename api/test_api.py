@@ -18,36 +18,56 @@ main.app.dependency_overrides[auth.active_user] = lambda: {
     "id": 1, "username": "test", "role": "creator", "must_change": False}
 
 
-class FakeResponse:
+class FakeStream:
+    """Stands in for httpx's streaming response: Ollama sends NDJSON chunks."""
     status_code = 200
 
-    def __init__(self, payload):
-        self._payload = payload
+    def __init__(self, chunks):
+        self._chunks = chunks
 
-    def json(self):
-        return self._payload
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def aiter_lines(self):
+        for chunk in self._chunks:
+            yield json.dumps(chunk)
+
+    async def aread(self):
+        return b""
 
 
-def fake_ollama(*replies):
-    """Return an async post() that yields each scripted reply and records what was sent."""
-    it = iter(replies)
+def text_round(text):
+    """One streamed assistant reply, split across two chunks."""
+    half = len(text) // 2
+    return [{"message": {"role": "assistant", "content": text[:half]}, "done": False},
+            {"message": {"role": "assistant", "content": text[half:]}, "done": True}]
+
+
+def tool_round(name):
+    return [{"message": {"role": "assistant",
+                         "tool_calls": [{"function": {"name": name, "arguments": {}}}]},
+             "done": True}]
+
+
+def fake_ollama(*rounds):
+    """Patch for AsyncClient.stream: one scripted round per call, recording bodies."""
+    it = iter(rounds)
     sent = []
 
-    async def post(self, url, json=None, **kw):
+    def stream(self, method, url, json=None, **kw):   # not async: returns a ctx manager
         sent.append(json)
-        return FakeResponse({"message": next(it)})
+        return FakeStream(next(it))
 
-    post.sent = sent
-    return post
+    stream.sent = sent
+    return stream
 
 
 def test_tool_call_executes_and_loop_terminates():
-    replies = (
-        {"role": "assistant", "tool_calls": [
-            {"function": {"name": "current_time", "arguments": {}}}]},
-        {"role": "assistant", "content": "It is currently that time."},
-    )
-    with patch("httpx.AsyncClient.post", fake_ollama(*replies)):
+    rounds = (tool_round("current_time"), text_round("It is currently that time."))
+    with patch("httpx.AsyncClient.stream", fake_ollama(*rounds)):
         r = TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "what time is it"}]})
 
@@ -61,12 +81,8 @@ def test_tool_call_executes_and_loop_terminates():
 
 
 def test_unknown_tool_reports_back_instead_of_crashing():
-    replies = (
-        {"role": "assistant", "tool_calls": [
-            {"function": {"name": "nope", "arguments": {}}}]},
-        {"role": "assistant", "content": "That tool does not exist."},
-    )
-    with patch("httpx.AsyncClient.post", fake_ollama(*replies)):
+    rounds = (tool_round("nope"), text_round("That tool does not exist."))
+    with patch("httpx.AsyncClient.stream", fake_ollama(*rounds)):
         r = TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
 
@@ -76,26 +92,23 @@ def test_unknown_tool_reports_back_instead_of_crashing():
 
 
 def test_runaway_tool_loop_is_capped():
-    forever = {"role": "assistant", "tool_calls": [
-        {"function": {"name": "current_time", "arguments": {}}}]}
-    with patch("httpx.AsyncClient.post", fake_ollama(*[forever] * 20)):
+    with patch("httpx.AsyncClient.stream", fake_ollama(*[tool_round("current_time")] * 20)):
         r = TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
 
-    assert r.status_code == 508, r.text
+    assert r.status_code == 502, r.text
+    assert "tool loop exceeded" in r.json()["detail"]
 
 
 def test_think_defaults_off_and_is_overridable_per_request():
-    reply = {"role": "assistant", "content": "hi"}
-
-    post = fake_ollama(reply)
-    with patch("httpx.AsyncClient.post", post):
+    post = fake_ollama(text_round("hi"))
+    with patch("httpx.AsyncClient.stream", post):
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
     assert post.sent[0]["think"] is False, post.sent[0]
 
-    post = fake_ollama(reply)
-    with patch("httpx.AsyncClient.post", post):
+    post = fake_ollama(text_round("hi"))
+    with patch("httpx.AsyncClient.stream", post):
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}], "think": True})
     assert post.sent[0]["think"] is True, post.sent[0]
@@ -103,23 +116,50 @@ def test_think_defaults_off_and_is_overridable_per_request():
 
 def test_think_omitted_for_non_thinking_models():
     """Non-thinking models (qwen2.5) reject the flag, so it must be omittable."""
-    reply = {"role": "assistant", "content": "hi"}
-    post = fake_ollama(reply)
+    post = fake_ollama(text_round("hi"))
     with patch.dict(settings._overrides, {"llm.think": "model-default"}), \
-         patch("httpx.AsyncClient.post", post):
+         patch("httpx.AsyncClient.stream", post):
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
     assert "think" not in post.sent[0], post.sent[0]
 
 
 def test_infer_uses_the_configured_model_not_the_env_default():
-    reply = {"role": "assistant", "content": "hi"}
-    post = fake_ollama(reply)
+    post = fake_ollama(text_round("hi"))
     with patch.dict(settings._overrides, {"llm.model": "some-other-model"}), \
-         patch("httpx.AsyncClient.post", post):
+         patch("httpx.AsyncClient.stream", post):
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
     assert post.sent[0]["model"] == "some-other-model", post.sent[0]
+
+
+def test_stream_emits_deltas_before_completion():
+    """Nothing user-facing waits for the whole reply (SPEC.md 16), so the events must
+    arrive incrementally and in order: text deltas, then done."""
+    import asyncio
+
+    rounds = (tool_round("current_time"), text_round("One. Two."))
+    with patch("httpx.AsyncClient.stream", fake_ollama(*rounds)):
+        async def collect():
+            return [e async for e in main.reasoning.stream(
+                [{"role": "user", "content": "x"}])]
+        events = asyncio.run(collect())
+
+    kinds = [e["type"] for e in events]
+    assert kinds[0] == "tool", kinds
+    assert kinds[-1] == "done", kinds
+    deltas = [e["text"] for e in events if e["type"] == "delta"]
+    assert len(deltas) > 1, "reply arrived in one lump instead of streaming"
+    assert "".join(deltas) == "One. Two."
+    assert events[-1]["message"]["content"] == "One. Two."
+
+
+def test_run_and_stream_share_one_path():
+    """run() collects stream(), so the two cannot drift apart."""
+    with patch("httpx.AsyncClient.stream", fake_ollama(text_round("same answer"))):
+        r = TestClient(main.app).post("/infer", json={"messages": [
+            {"role": "user", "content": "x"}]})
+    assert r.json()["message"]["content"] == "same answer"
 
 
 # ------------------------------------------------------------- settings ----

@@ -78,7 +78,7 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
 ## 5. Default Technical Choices
 
 - **LLM serving:** Ollama, ~~Qwen2.5-14B-Instruct Q4_K_M~~ → **`qwen3:8b`, thinking off by default** (superseded 2026-08-02 with Santiago's approval; original text kept for the record). No 14B model fits this GPU's 7.1 GiB; qwen3:8b is the only candidate that runs 100% on GPU *and* answers in under a second. Measurements and reasoning in §10.
-- **STT:** faster-whisper large-v3. **TTS:** XTTS v2/F5-TTS — voice source still open (Phase 2).
+- **STT:** faster-whisper large-v3. **TTS:** XTTS v2/F5-TTS — **voice source resolved 2026-08-02: option (b), a built-in XTTS speaker shaped through pacing and delivery** (Santiago's choice; the Phase 2 ASK USER is closed).
 - **Wake word:** openWakeWord, trained on "IRiS."
 - **Vector memory:** Qdrant. **Structured/event store:** Postgres. **Session state:** Redis. **Event bus:** MQTT.
 - **Vision:** local VLM (Qwen2-VL) — used for camera events and general image/video description alike.
@@ -518,3 +518,42 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   reports the loaded model; the conversation list renders scrollable with the active item
   marked; the mic button renders in the composer and reports a clear message when the
   browser withholds microphone access. 20/20 tests pass.
+
+---
+
+## 16. Phase 2 (part 2) — Voice Output & Streaming
+
+- **Voice source, resolved.** Santiago chose **option (b)**: a built-in XTTS speaker
+  shaped through pacing and delivery, not a cloned recording. The Phase 2 ASK USER is
+  closed and Section 5 is updated. XTTS v2 ships 58 built-in speakers; the voice and its
+  pace are settings (`voice.tts_speaker`, `voice.tts_speed`), so the choice stays
+  reversible without touching code.
+
+- **Stated by Santiago, verbatim:**
+
+  > For text i dont want to have to wait for the entire response to generate, it should
+  > 'stream' the text, and the audio should also not generate the whole response and only
+  > then say stuff, it should do it per sentence, so that while one sentence is being
+  > outputted another is being generated stringing it together so there is no waiting for
+  > the user, or at least a minimal amount.
+
+  **Standing rule:** nothing user-facing waits for a whole response. Text streams token
+  by token; speech is synthesised and played per sentence, with the next sentence
+  synthesised while the current one plays. Applies to every later phase that produces
+  long output, and to Phase 5's React port.
+
+- **PyTorch must come from the cu124 index.** The default PyPI wheel targets a newer CUDA
+  than driver 550 supports and dies at runtime with *"driver is too old (found version
+  12040)"*. `tts/Dockerfile` installs `torch==2.6.0+cu124` **before** `coqui-tts` so the
+  dependency resolver cannot pull the incompatible build. The STT service is unaffected
+  because CTranslate2 bundles its own CUDA runtime — a difference worth remembering when
+  adding any further GPU service.
+
+- **Synthesis is faster than playback**, which is what makes the per-sentence pipeline
+  work: 1.45 s to render a sentence that takes ~5 s to speak, so speech stays ahead of
+  the reader after the first sentence. XTTS output is 24 kHz mono WAV.
+
+- **One reasoning path, still.** `reasoning.stream()` is now the primitive and
+  `reasoning.run()` consumes it, so streaming and non-streaming cannot drift. Tool calls
+  work mid-stream: a round that ends in tool calls executes them, emits a tool event, and
+  starts the next streamed round.

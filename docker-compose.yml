@@ -43,6 +43,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       STT_URL: http://stt:8001
+      TTS_URL: http://tts:8002
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-false}
@@ -70,6 +71,19 @@ services:
       - ./data/whisper:/models
     ports:
       - "127.0.0.1:8001:8001"
+
+  tts:
+    build: ./tts
+    restart: unless-stopped
+    devices:
+      - nvidia.com/gpu=all
+    environment:
+      TTS_SPEAKER: ${TTS_SPEAKER:-Daisy Studious}
+      TTS_DEVICE: ${TTS_DEVICE:-cuda}
+    volumes:
+      - ./data/tts:/models
+    ports:
+      - "127.0.0.1:8002:8002"
 
   ollama:
     image: ollama/ollama:latest

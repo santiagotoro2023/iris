@@ -182,8 +182,16 @@ button { font: inherit; color: inherit; }
 .msg.assistant { align-self: flex-start; background: var(--panel); }
 .msg.tool { align-self: flex-start; font-family: var(--mono); font-size: .72rem;
             color: var(--dim); background: none; border-style: dashed; max-width: 100%; }
-.msg-role { font-family: var(--mono); font-size: .62rem; letter-spacing: .14em;
+.msg-role { display: flex; align-items: center; gap: .4rem;
+            font-family: var(--mono); font-size: .62rem; letter-spacing: .14em;
             text-transform: uppercase; color: var(--dim); margin-bottom: .3rem; }
+.speak { border: 0; background: none; color: var(--dim); cursor: pointer;
+         padding: 0; line-height: 0; opacity: .55; }
+.speak:hover { color: var(--orange); opacity: 1; }
+.speak.busy { color: var(--orange); opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .speak.busy { animation: pulse 1.2s ease-in-out infinite; }
+}
 .msg.assistant .msg-role { color: var(--orange); }
 .composer { display: flex; gap: .5rem; align-items: flex-end;
             border-top: 1px solid var(--line); padding-top: .7rem; }

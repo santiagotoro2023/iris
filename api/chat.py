@@ -9,6 +9,7 @@ import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import activity
@@ -77,6 +78,43 @@ async def delete_conversation(cid: str, user: dict = Depends(auth.active_user)):
     await _redis.hdel(_index_key(user["id"]), cid)
     await activity.record("chat.delete", f"conversation {cid[:8]}", user["username"])
     return {"ok": True}
+
+
+@router.post("/stream")
+async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
+    """Newline-delimited JSON, one event per line, so the client can render text as it
+    arrives instead of waiting for the whole reply (SPEC.md 16)."""
+    uid = user["id"]
+    cid = body.conversation_id or uuid.uuid4().hex
+    history = await _load(uid, cid) if body.conversation_id else []
+    history.append({"role": "user", "content": body.content})
+    title = None if body.conversation_id else body.content.strip()[:60]
+
+    async def events():
+        yield json.dumps({"type": "start", "conversation_id": cid}) + "\n"
+        final = None
+        try:
+            async for event in reasoning.stream(history, think=body.think):
+                if event["type"] == "done":
+                    final = event
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+
+        if final:
+            # Persist only once the turn completed, so an aborted stream cannot
+            # leave a half-written conversation behind.
+            await _save(uid, cid, final["messages"], title)
+            used = [m["tool_name"] for m in final["messages"] if m.get("role") == "tool"]
+            await activity.record(
+                "chat.message",
+                f"{len(body.content)} chars, streamed"
+                + (f", tools: {', '.join(used)}" if used else ""),
+                user["username"])
+
+    return StreamingResponse(events(), media_type="application/x-ndjson",
+                             headers={"cache-control": "no-cache",
+                                      "x-accel-buffering": "no"})
 
 
 @router.post("/message")

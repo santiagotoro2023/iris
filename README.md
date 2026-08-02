@@ -90,8 +90,21 @@ keeps it loaded permanently.
 > `tailscale serve https / http://127.0.0.1:8000` to terminate TLS, and set
 > `IRIS_COOKIE_SECURE=1` once you do.
 
-TTS is not built yet — it is blocked on the voice-source decision, which SPEC.md
-marks as a mandatory stop because it defines IRiS's voice permanently.
+Text-to-speech runs in its own GPU service (`tts`, XTTS v2) using one of its 58
+built-in speakers — voice and pace are settings, so the choice stays reversible.
+
+**Nothing waits for a whole response.** Text streams token by token, and speech is
+synthesised and played one sentence at a time, with the next sentence rendering while
+the current one plays. Measured on a four-sentence reply:
+
+| | streamed | if it waited for the whole reply |
+|---|---|---|
+| first text visible | 0.43 s | 3.06 s |
+| speech starts | 1.99 s | ~4.5 s |
+
+Synthesis runs ~3x faster than playback (1.45 s for ~5 s of speech), so after the
+first sentence the audio never stalls. Turn it on with *Speak replies aloud*, or play
+any single reply with the speaker button on it.
 
 Every control is drawn by the app — no native `<select>`, no number-spinner arrows,
 no browser validation bubbles. Forms carry `novalidate` and report errors inline.

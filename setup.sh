@@ -13,7 +13,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
-DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/media
+DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts data/media
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -138,16 +138,27 @@ wait_for_ollama() {
   die "Ollama did not come up within 120s. Check: docker compose logs ollama"
 }
 
-# The speech model is ~3 GB on first run; wait so the install finishes ready to use
-# rather than stalling the first recording. Non-fatal — text still works without it.
-wait_for_stt() {
-  local i
-  log "Waiting for the speech model (~3 GB on first run)..."
-  for i in $(seq 1 120); do
-    curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1 && return 0
+# Speech (~3 GB) and voice (~2 GB) weights download on first run. Wait so the install
+# finishes ready to use rather than stalling the first recording. Non-fatal: text chat
+# works without either, so a slow download must never fail the install.
+wait_for_voice() {
+  local i stt=0 tts=0
+  log "Waiting for the speech and voice models (~5 GB on first run)..."
+  for i in $(seq 1 180); do
+    if [ "$stt" -eq 0 ] && curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
+      stt=1
+      log "  speech service ready"
+    fi
+    if [ "$tts" -eq 0 ] && curl -fsS http://127.0.0.1:8002/health >/dev/null 2>&1; then
+      tts=1
+      log "  voice service ready"
+    fi
+    if [ "$stt" -eq 1 ] && [ "$tts" -eq 1 ]; then
+      return 0
+    fi
     sleep 5
   done
-  warn "Speech service not ready yet; it is still downloading. Text chat works meanwhile."
+  warn "Voice services still downloading (speech=$stt voice=$tts). Text chat works meanwhile."
 }
 
 pull_model() {
@@ -168,7 +179,7 @@ install() {
   dc up -d --build
   wait_for_ollama
   pull_model
-  wait_for_stt
+  wait_for_voice
   log "Done. IRiS is running."
   echo
   echo "  Settings   http://localhost:8000/"
