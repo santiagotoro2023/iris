@@ -410,3 +410,60 @@ This is a **standing maintenance obligation**, not a one-time task: every phase 
   logout invalidates the session; the 10th consecutive bad password returns 429 and the
   correct password is refused while locked. Browser: `/` redirects to the login page, and
   `creator`/`1234` lands on the forced password-change form rather than the settings UI.
+
+---
+
+## 14. App-Drawn Controls & Full Web Client
+
+- **Stated by Santiago, verbatim:**
+
+  > There is still HTML warnings (like password too short) and general unstyled HTML
+  > elements, please fix that so all elements (drop down, increase / decrease, password
+  > length etc.) are all handled by the application and not in that horrible default
+  > HTML style. Also in the webui of the server should also be all of the functions
+  > that will be in the app like a way to see memories interact with the model tts stt
+  > etc. fully functionality.
+
+  **Standing rule:** no native form chrome anywhere in the product. No `<select>`, no
+  number-input spinner arrows, no browser validation bubbles or `required`/`minlength`
+  tooltips. Forms carry `novalidate` and report every error inline in IRiS's own style.
+  Applies to every phase and to Phase 5's React port — those must reuse these controls,
+  not fall back to native ones.
+
+- **Shared controls live in `api/static/app.js`:** `Combo` (replaces `<select>`,
+  filterable — a 486-entry timezone list is unusable otherwise, keyboard accessible with
+  arrows/Home/End/Enter/Escape and correct `combobox`/`listbox` ARIA), `Stepper`
+  (replaces the number spinner, clamps and disables at bounds), `Toggle` (replaces the
+  checkbox, `role="switch"`). `app.js` is wrapped in an IIFE and exports only
+  `window.IRiS`, because leaking `$` into global scope makes every page that
+  destructures it a redeclaration `SyntaxError`.
+
+- **The web UI is the whole client, not a settings page.** Tabs: Chat, Settings,
+  Activity. Voice and Memory arrive with Phases 2 and 3 — they are not stubbed, because
+  a tab that pretends to show memories IRiS does not have yet is worse than no tab.
+
+- **One reasoning path.** `reasoning.py` holds the tool registry and the tool-calling
+  loop; `/infer` and the chat view both call `reasoning.run`, so there is one place
+  where IRiS thinks rather than two that drift.
+
+- **Conversations are server-side (Redis), per user**, storing the full transcript
+  including tool turns — the chat view shows what IRiS actually did, not just what it
+  said. This is the Phase 5 cross-device handoff mechanism, working early.
+
+- **Redis now persists (AOF, `./data/redis`).** It holds conversations, which are user
+  content, not just disposable sessions. Without a volume every container recreate
+  silently destroyed chat history — found by losing a conversation mid-test.
+
+- **Static files are served `no-cache`.** Browsers otherwise cache the app shell
+  heuristically and keep running old code after an update; this cost a confusing
+  debugging round where a fix appeared not to work. Still allows 304s. Matters more
+  once Phase 5 ships updates as bundle pulls.
+
+- **Verified 2026-08-02:** login validation reports "enter a username" inline with no
+  browser bubble and no form navigation; the timezone combobox filters 486 entries to
+  one on "zur"; the session-hours stepper renders with app-drawn − / + and no native
+  spinner; a chat message round-trips through the tool loop and renders as bubbles; a
+  follow-up in the same conversation correctly recalled the earlier question; the
+  activity log shows `auth.login`, `chat.message` with tools used, `settings.change`
+  and `chat.delete`, each attributed to `creator`; Redis data survived a full container
+  recreate. 20/20 tests pass.

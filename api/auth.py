@@ -16,6 +16,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+import activity
 import settings
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -211,6 +212,7 @@ async def login(body: Credentials, response: Response):
         raise HTTPException(401, "invalid username or password")
 
     await _redis.delete(fail_key)
+    await activity.record("auth.login", f"role {user['role']}", user["username"])
     token = await _new_session(user["id"])
     response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax",
                         secure=COOKIE_SECURE,

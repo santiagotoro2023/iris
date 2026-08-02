@@ -64,6 +64,23 @@ and shown exactly once. Ten failed logins lock an account for 15 minutes.
 
 `GET /healthz` is public and deliberately says nothing but `{"ok": true}`.
 
+## Web UI
+
+`http://localhost:8000/` is the full client, not a settings page. Three tabs today:
+
+- **Chat** — conversations with IRiS, including the tool calls it made. History is
+  stored server-side per user, so the same conversation opens on any device.
+- **Settings** — every registered setting, rendered from the schema.
+- **Activity** — the audit log (SPEC.md 3.2): what IRiS did, when, and for whom.
+
+Voice and memory tabs arrive with Phases 2 and 3.
+
+Every control is drawn by the app — no native `<select>`, no number-spinner arrows,
+no browser validation bubbles. Forms carry `novalidate` and report errors inline.
+The pieces live in `api/static/app.js` (`Combo`, `Stepper`, `Toggle`) and are shared
+by every page; the combobox filters, which is what makes a 486-entry timezone list
+usable. Phase 5's React app should port these, not reintroduce native controls.
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,
@@ -109,6 +126,9 @@ Tools are registered with the `@tool` decorator in `api/main.py`.
 | `qdrant` | 6333 | vector memory |
 | `redis` | 6379 | session state |
 | `mqtt` | 1883 | event bus |
+
+Redis runs with AOF persistence into `./data/redis` — it holds conversations, not
+just sessions, so its data has to survive a container recreate.
 
 ## Notes for contributors
 

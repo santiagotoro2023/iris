@@ -12,10 +12,12 @@ import json
 import os
 
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from jsonschema import Draft202012Validator
 from psycopg.types.json import Jsonb
+
+import activity
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -97,7 +99,7 @@ async def get_values():
 
 
 @router.put("/values")
-async def put_values(patch: dict):
+async def put_values(patch: dict, request: Request):
     """Apply a partial update. Validates the *merged* result, so a patch cannot
     leave the configuration in a state the schema forbids."""
     unknown = sorted(set(patch) - set(REGISTRY))
@@ -120,6 +122,10 @@ async def put_values(patch: dict):
     # Multiple workers would each hold a stale copy — move to LISTEN/NOTIFY if that changes.
     _overrides.update(patch)
     await _broadcast(patch)
+    await activity.record(
+        "settings.change",
+        ", ".join(f"{k} = {v}" for k, v in patch.items()),
+        getattr(getattr(request, "state", None), "username", None))
     return values()
 
 

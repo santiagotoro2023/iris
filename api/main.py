@@ -1,32 +1,27 @@
-"""IRiS core reasoning API.
+"""IRiS API.
 
-Everything routes through /infer — nothing talks to Ollama directly (SPEC.md Phase 1).
-Runtime configuration comes from the settings service, never from a config file
-the user cannot reach (SPEC.md 3.1).
+Everything routes through here — nothing talks to Ollama directly (SPEC.md Phase 1).
+Runtime configuration comes from the settings service, never from a file the user
+cannot reach (SPEC.md 3.1).
 """
 import os
 import time
 import zoneinfo
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import activity
 import auth
+import chat
+import reasoning
 import settings
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-MAX_TOOL_HOPS = 5
-
-# Env vars seed the *defaults*; the settings service owns the live value.
-_THINK_SEED = {"true": "always", "false": "never"}.get(
-    os.environ.get("IRIS_THINK", "false").strip().lower(), "model-default")
-
+OLLAMA_URL = reasoning.OLLAMA_URL
 _tags_cache: tuple[float, list[str]] = (0.0, [])
 
 
@@ -54,7 +49,9 @@ settings.setting(
                                "Lists the models currently pulled on this machine.")
 settings.setting(
     "llm.think", type="string", enum=["never", "always", "model-default"],
-    default=_THINK_SEED, title="Reasoning mode",
+    default={"true": "always", "false": "never"}.get(
+        os.environ.get("IRIS_THINK", "false").strip().lower(), "model-default"),
+    title="Reasoning mode",
     description="Reason before answering. 'always' is far more accurate on hard "
                 "questions and far slower; 'never' keeps replies conversational.")
 settings.setting(
@@ -63,40 +60,31 @@ settings.setting(
     default=os.environ.get("IRIS_TZ", "Europe/Zurich"),
     title="Timezone", description="IANA timezone used for times IRiS reports.")
 
-# name -> (ollama tool schema, callable). Later phases register integrations/search/vision here.
-TOOLS: dict[str, tuple[dict, callable]] = {}
-
-
-def tool(name: str, description: str, parameters: dict):
-    schema = {
-        "type": "function",
-        "function": {"name": name, "description": description, "parameters": parameters},
-    }
-
-    def register(fn):
-        TOOLS[name] = (schema, fn)
-        return fn
-
-    return register
-
-
-@tool("current_time", "Current date and time in the user's local timezone.",
-      {"type": "object", "properties": {}})
-def _current_time():
-    return datetime.now(ZoneInfo(settings.get("general.timezone"))).isoformat(timespec="seconds")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await settings.init()
     await auth.init()
+    await activity.init()
+    await chat.init()
     yield
 
 
 app = FastAPI(title="IRiS", lifespan=lifespan)
+
+async def _gated(request: Request, user: dict = Depends(auth.active_user)) -> dict:
+    """Auth gate that also stamps the actor, so the audit log knows who acted
+    without every module having to resolve the session again."""
+    request.state.username = user["username"]
+    return user
+
+
 app.include_router(auth.router)
-# Everything below the API surface requires a logged-in user whose password is current.
-app.include_router(settings.router, dependencies=[Depends(auth.active_user)])
+# Everything below requires a logged-in user whose password is current.
+_gate = [Depends(_gated)]
+app.include_router(settings.router, dependencies=_gate)
+app.include_router(activity.router, dependencies=_gate)
+app.include_router(chat.router)  # its own routes depend on active_user individually
 
 
 class InferRequest(BaseModel):
@@ -114,60 +102,33 @@ async def healthz():
 @app.get("/health")
 async def health(_: dict = Depends(auth.active_user)):
     async with httpx.AsyncClient(timeout=5) as c:
-        r = await c.get(f"{OLLAMA_URL}/api/tags")
-    return {"ollama_ok": r.status_code == 200,
+        try:
+            ok = (await c.get(f"{OLLAMA_URL}/api/tags")).status_code == 200
+        except Exception:
+            ok = False
+    return {"ollama_ok": ok,
             "model": settings.get("llm.model"),
             "think": settings.get("llm.think"),
-            "tools": sorted(TOOLS)}
+            "tools": sorted(reasoning.TOOLS)}
 
 
 @app.post("/infer")
 async def infer(req: InferRequest, _: dict = Depends(auth.active_user)):
-    messages = list(req.messages)
-    if req.think is None:
-        # 'model-default' omits the flag entirely, which non-thinking models require.
-        think = {"never": False, "always": True}.get(settings.get("llm.think"))
-    else:
-        think = req.think
+    return await reasoning.run(req.messages, model=req.model, think=req.think)
 
-    async with httpx.AsyncClient(timeout=600) as c:
-        for _ in range(MAX_TOOL_HOPS):
-            body = {
-                "model": req.model or settings.get("llm.model"),
-                "messages": messages,
-                "tools": [schema for schema, _ in TOOLS.values()],
-                "stream": False,
-            }
-            if think is not None:
-                body["think"] = think
-            r = await c.post(f"{OLLAMA_URL}/api/chat", json=body)
-            if r.status_code != 200:
-                raise HTTPException(502, f"ollama: {r.text}")
 
-            msg = r.json()["message"]
-            calls = msg.get("tool_calls")
-            if not calls:
-                return {"message": msg, "messages": messages + [msg]}
+class RevalidatingStatic(StaticFiles):
+    """Without an explicit Cache-Control browsers cache the shell heuristically and
+    keep running old code after an update. `no-cache` still allows 304s — it only
+    requires revalidation (SPEC.md Phase 5 ships updates as bundle pulls)."""
 
-            messages.append(msg)
-            for call in calls:
-                fn = call["function"]
-                name = fn["name"]
-                if name not in TOOLS:
-                    result = f"error: no such tool {name!r}"
-                else:
-                    # A failing tool reports back to the model instead of 500ing the request,
-                    # so it can recover or explain rather than the whole turn dying.
-                    try:
-                        result = str(TOOLS[name][1](**fn.get("arguments", {})))
-                    except Exception as e:
-                        result = f"error: {e}"
-                messages.append({"role": "tool", "tool_name": name, "content": result})
-
-    raise HTTPException(508, f"tool loop exceeded {MAX_TOOL_HOPS} hops")
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-cache"
+        return response
 
 
 # Mounted last so it cannot shadow the API routes above.
 _static = Path(__file__).parent / "static"
 if _static.is_dir():
-    app.mount("/", StaticFiles(directory=_static, html=True), name="ui")
+    app.mount("/", RevalidatingStatic(directory=_static, html=True), name="ui")

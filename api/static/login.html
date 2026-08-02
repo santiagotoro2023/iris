@@ -5,101 +5,103 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IRiS — Sign in</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
 <style>
-  :root {
-    --orange: #FF7A1A; --bg: #0e0f11; --panel: #16181c; --line: #2a2e35;
-    --text: #e6e8ea; --dim: #8b929c;
-    --sans: "Space Grotesk", "Inter", "IBM Plex Sans", system-ui, sans-serif;
-    --mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: var(--bg); color: var(--text); font-family: var(--sans);
-    background-image:
-      linear-gradient(var(--line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 48px 48px; background-position: -1px -1px;
-  }
-  body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse at 50% 0%, transparent 0%, var(--bg) 78%); }
-  main { position: relative; width: min(92vw, 380px); }
+  body { display: grid; place-items: center; }
+  main { position: relative; z-index: 1; width: min(92vw, 380px); }
   .brand { display: flex; align-items: center; gap: .7rem; justify-content: center;
-           margin-bottom: 1.5rem; }
-  h1 { font-size: 1.3rem; letter-spacing: .14em; text-transform: uppercase; margin: 0; }
-  h1 span { color: var(--orange); }
+           margin-bottom: 1.4rem; }
   form { border: 1px solid var(--line); background: var(--panel); padding: 1.4rem; }
-  h2 { font-family: var(--mono); font-size: .7rem; letter-spacing: .18em;
-       text-transform: uppercase; color: var(--orange); margin: 0 0 1.1rem; }
-  label { display: block; font-size: .82rem; margin: 0 0 .25rem; }
-  input { width: 100%; padding: .55rem .6rem; margin-bottom: .9rem; background: #0b0c0e;
-          color: var(--text); border: 1px solid var(--line); font-family: var(--mono);
-          font-size: .88rem; }
-  button { width: 100%; padding: .6rem; background: var(--orange); color: #14161a;
-           border: 0; font-family: var(--sans); font-weight: 600; font-size: .9rem;
-           letter-spacing: .04em; cursor: pointer; }
-  button:hover { filter: brightness(1.08); }
-  :focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
-  .msg { font-family: var(--mono); font-size: .74rem; min-height: 1.2rem; margin-top: .7rem; }
-  .err { color: #ff6b6b; }
+  form > h2 { font-family: var(--mono); font-size: .68rem; letter-spacing: .18em;
+              text-transform: uppercase; color: var(--orange); margin: 0 0 1.1rem; }
+  .field { margin-bottom: .9rem; }
+  .field label { display: block; font-size: .82rem; margin-bottom: .25rem; }
+  .btn { width: 100%; margin-top: .3rem; }
   .note { color: var(--dim); font-size: .76rem; line-height: 1.5; margin: 0 0 1rem; }
   .hidden { display: none; }
+  .hint { font-family: var(--mono); font-size: .68rem; color: var(--dim); margin-top: .3rem; }
+  .hint.err { color: var(--err); }
+  .formmsg { font-family: var(--mono); font-size: .74rem; min-height: 1.2rem;
+             margin-top: .7rem; }
+  .formmsg.err { color: var(--err); }
 </style>
 </head>
 <body>
 <main>
   <div class="brand">
     <img src="logo.svg" alt="" width="34" height="34">
-    <h1>IR<span>i</span>S</h1>
+    <h1 class="wordmark">IR<span>i</span>S</h1>
   </div>
 
-  <form id="login-form">
+  <!-- novalidate: validation messages are drawn by the app, not the browser -->
+  <form id="login-form" novalidate>
     <h2>Sign in</h2>
-    <label for="u">Username</label>
-    <input id="u" name="username" autocomplete="username" autofocus required>
-    <label for="p">Password</label>
-    <input id="p" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">Sign in</button>
-    <div class="msg" id="login-msg" role="status" aria-live="polite"></div>
+    <div class="field">
+      <label for="u">Username</label>
+      <input class="input" id="u" autocomplete="username" autofocus>
+      <div class="hint" id="u-hint"></div>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input class="input" id="p" type="password" autocomplete="current-password">
+      <div class="hint" id="p-hint"></div>
+    </div>
+    <button class="btn" type="submit">Sign in</button>
+    <div class="formmsg" id="login-msg" role="status" aria-live="polite"></div>
   </form>
 
-  <form id="change-form" class="hidden">
+  <form id="change-form" class="hidden" novalidate>
     <h2>Choose a new password</h2>
     <p class="note">This account still uses its initial password. Pick a new one to continue.</p>
-    <label for="np">New password</label>
-    <input id="np" type="password" autocomplete="new-password" minlength="8" required>
-    <label for="np2">Repeat new password</label>
-    <input id="np2" type="password" autocomplete="new-password" minlength="8" required>
-    <button type="submit">Set password</button>
-    <div class="msg" id="change-msg" role="status" aria-live="polite"></div>
+    <div class="field">
+      <label for="np">New password</label>
+      <input class="input" id="np" type="password" autocomplete="new-password">
+      <div class="hint" id="np-hint">at least 8 characters</div>
+    </div>
+    <div class="field">
+      <label for="np2">Repeat new password</label>
+      <input class="input" id="np2" type="password" autocomplete="new-password">
+      <div class="hint" id="np2-hint"></div>
+    </div>
+    <button class="btn" type="submit">Set password</button>
+    <div class="formmsg" id="change-msg" role="status" aria-live="polite"></div>
   </form>
 </main>
 
+<script src="app.js"></script>
 <script>
-const $ = s => document.querySelector(s);
-let currentPassword = null;
+const {$, send} = window.IRiS;
+let initialPassword = null;
 
-async function post(url, body) {
-  const r = await fetch(url, {
-    method: "POST", headers: {"content-type": "application/json"},
-    body: JSON.stringify(body),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || `error ${r.status}`);
-  return data;
+function mark(id, message) {
+  const input = $("#" + id), hint = $("#" + id + "-hint");
+  input.classList.toggle("invalid", !!message);
+  hint.textContent = message || (id === "np" ? "at least 8 characters" : "");
+  hint.className = "hint" + (message ? " err" : "");
+  return !message;
+}
+
+function setMsg(id, text, isError) {
+  const n = $("#" + id);
+  n.textContent = text;
+  n.className = "formmsg" + (isError ? " err" : "");
 }
 
 $("#login-form").addEventListener("submit", async e => {
   e.preventDefault();
-  const msg = $("#login-msg");
-  msg.textContent = "signing in…";
-  msg.className = "msg";
+  const ok = [
+    mark("u", $("#u").value.trim() ? "" : "enter a username"),
+    mark("p", $("#p").value ? "" : "enter a password"),
+  ].every(Boolean);
+  if (!ok) return;
+
+  setMsg("login-msg", "signing in…", false);
   try {
-    const data = await post("auth/login", {
-      username: $("#u").value, password: $("#p").value,
+    const data = await send("auth/login", {
+      username: $("#u").value.trim(), password: $("#p").value,
     });
     if (data.user.must_change_password) {
-      currentPassword = $("#p").value;
+      initialPassword = $("#p").value;
       $("#login-form").classList.add("hidden");
       $("#change-form").classList.remove("hidden");
       $("#np").focus();
@@ -107,29 +109,29 @@ $("#login-form").addEventListener("submit", async e => {
     }
     location.href = "./";
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = "msg err";
+    setMsg("login-msg", err.message, true);
   }
+});
+
+$("#np").addEventListener("input", () => {
+  if ($("#np").value.length >= 8) mark("np", "");
 });
 
 $("#change-form").addEventListener("submit", async e => {
   e.preventDefault();
-  const msg = $("#change-msg");
-  if ($("#np").value !== $("#np2").value) {
-    msg.textContent = "passwords do not match";
-    msg.className = "msg err";
-    return;
-  }
-  msg.textContent = "saving…";
-  msg.className = "msg";
+  const pw = $("#np").value, pw2 = $("#np2").value;
+  const ok = [
+    mark("np", pw.length >= 8 ? "" : `too short — ${8 - pw.length} more character(s)`),
+    mark("np2", pw2 === pw ? "" : "passwords do not match"),
+  ].every(Boolean);
+  if (!ok) return;
+
+  setMsg("change-msg", "saving…", false);
   try {
-    await post("auth/password", {
-      current_password: currentPassword, new_password: $("#np").value,
-    });
+    await send("auth/password", {current_password: initialPassword, new_password: pw});
     location.href = "./";
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = "msg err";
+    setMsg("change-msg", err.message, true);
   }
 });
 </script>

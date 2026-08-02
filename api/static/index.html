@@ -3,136 +3,121 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IRiS — Settings</title>
+<title>IRiS</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
-<style>
-  :root {
-    --orange: #FF7A1A;
-    --bg: #0e0f11;
-    --panel: #16181c;
-    --line: #2a2e35;
-    --text: #e6e8ea;
-    --dim: #8b929c;
-    --sans: "Space Grotesk", "Inter", "IBM Plex Sans", system-ui, sans-serif;
-    --mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-    background-image:
-      linear-gradient(var(--line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 48px 48px;
-    background-position: -1px -1px;
-  }
-  body::before {
-    content: ""; position: fixed; inset: 0; background: radial-gradient(
-      ellipse at 50% 0%, transparent 0%, var(--bg) 75%); pointer-events: none;
-  }
-  main { position: relative; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-  header { display: flex; align-items: center; gap: .7rem; margin-bottom: .35rem; }
-  .mark { flex: none; }
-  h1 { font-size: 1.4rem; letter-spacing: .14em; text-transform: uppercase; margin: 0; }
-  h1 span { color: var(--orange); }
-  .sub { font-family: var(--mono); font-size: .74rem; color: var(--dim); }
-
-  /* HUD status readout — always visible, per SPEC 2 */
-  .hud {
-    display: flex; flex-wrap: wrap; gap: 1.25rem; font-family: var(--mono);
-    font-size: .72rem; color: var(--dim); border: 1px solid var(--line);
-    background: var(--panel); padding: .6rem .85rem; margin: 1rem 0 2rem;
-  }
-  .hud b { color: var(--text); font-weight: 500; }
-  .dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
-         background: var(--dim); margin-right: .4rem; vertical-align: baseline; }
-  .dot.live { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
-  .dot.down { background: #d9534f; }
-
-  section { border: 1px solid var(--line); background: var(--panel); margin-bottom: 1.25rem; }
-  section > h2 {
-    font-family: var(--mono); font-size: .7rem; letter-spacing: .18em; text-transform: uppercase;
-    color: var(--orange); margin: 0; padding: .7rem .95rem; border-bottom: 1px solid var(--line);
-  }
-  .row { padding: .95rem; border-bottom: 1px solid var(--line); }
-  .row:last-child { border-bottom: 0; }
-  label { display: block; font-size: .92rem; margin-bottom: .2rem; }
-  .desc { font-size: .78rem; color: var(--dim); margin-bottom: .55rem; line-height: 1.45; }
-  .key { font-family: var(--mono); font-size: .68rem; color: var(--dim); }
-  input[type=text], input[type=number], select {
-    width: 100%; padding: .5rem .6rem; background: #0b0c0e; color: var(--text);
-    border: 1px solid var(--line); font-family: var(--mono); font-size: .85rem;
-  }
-  input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--orange); }
-  :focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
-  #logout { background: none; border: 1px solid var(--line); color: var(--dim);
-            font-family: var(--mono); font-size: .68rem; padding: .15rem .45rem;
-            margin-left: .5rem; cursor: pointer; }
-  #logout:hover { color: var(--text); border-color: var(--dim); }
-  .status { min-height: 1.1rem; font-family: var(--mono); font-size: .72rem; margin-top: .45rem; }
-  .ok { color: var(--orange); }
-  .err { color: #ff6b6b; }
-  @media (prefers-reduced-motion: no-preference) {
-    .dot.live { animation: pulse 2.4s ease-in-out infinite; }
-    @keyframes pulse { 50% { opacity: .45; } }
-  }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-<main>
-  <header>
-    <img src="logo.svg" alt="" width="38" height="38" class="mark">
-    <h1>IR<span>i</span>S</h1>
-    <span class="sub">configuration</span>
+<div class="shell">
+  <header class="topbar">
+    <img src="logo.svg" alt="" width="34" height="34">
+    <h1 class="wordmark">IR<span>i</span>S</h1>
+    <span class="spacer"></span>
+    <span class="key" id="hud-user">—</span>
+    <button class="ghost" id="logout" type="button">sign out</button>
   </header>
+
   <div class="hud">
     <span><span id="dot" class="dot"></span><b id="conn">connecting</b></span>
     <span>model <b id="hud-model">—</b></span>
     <span>reasoning <b id="hud-think">—</b></span>
     <span>ollama <b id="hud-ollama">—</b></span>
-    <span style="margin-left:auto">
-      <b id="hud-user">—</b>
-      <button id="logout" type="button">sign out</button>
-    </span>
   </div>
-  <div id="groups"></div>
-</main>
 
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true"  data-view="chat">Chat</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
+  </nav>
+
+  <section class="view active" id="view-chat" role="tabpanel">
+    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
+      <div id="conv-picker" style="flex:1"></div>
+      <button class="ghost" id="new-chat" type="button">new</button>
+      <button class="ghost" id="del-chat" type="button">delete</button>
+    </div>
+    <div class="chat-log" id="chat-log"></div>
+    <div class="composer">
+      <textarea id="composer" rows="1" placeholder="Ask IRiS…"
+                aria-label="Message"></textarea>
+      <button class="btn" id="send" type="button">Send</button>
+    </div>
+  </section>
+
+  <section class="view" id="view-settings" role="tabpanel">
+    <div id="groups"></div>
+  </section>
+
+  <section class="view" id="view-activity" role="tabpanel">
+    <div class="panel">
+      <h2>Activity &amp; audit log</h2>
+      <div id="activity-list"><div class="empty">loading…</div></div>
+    </div>
+  </section>
+</div>
+
+<script src="app.js"></script>
 <script>
-const $ = s => document.querySelector(s);
-let SCHEMA = {}, VALUES = {};
+const {$, el, api, json, send, Combo, Stepper, Toggle} = window.IRiS;
+let SCHEMA = {}, VALUES = {}, CONTROLS = {}, CONV = null, BUSY = false;
 
-const titleOf = g => g.replace(/[-_]/g, " ");
-
-// Any 401/403 means the session is gone or a password change is owed — either way
-// the login page is where the user needs to be.
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  if (r.status === 401 || r.status === 403) {
-    location.href = "login.html";
-    throw new Error("unauthenticated");
-  }
-  return r;
-}
-
-async function load() {
-  const [s, v, me] = await Promise.all([
-    api("settings/schema").then(r => r.json()),
-    api("settings/values").then(r => r.json()),
-    api("auth/me").then(r => r.json()),
-  ]);
-  SCHEMA = s.properties || {};
-  VALUES = v;
-  $("#hud-user").textContent = `${me.username} · ${me.role}`;
-  render();
-  refreshHud();
-}
+/* ---------------------------------------------------------------- tabs -- */
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t =>
+      t.setAttribute("aria-selected", String(t === tab)));
+    document.querySelectorAll(".view").forEach(v =>
+      v.classList.toggle("active", v.id === "view-" + tab.dataset.view));
+    if (tab.dataset.view === "activity") loadActivity();
+  });
+});
 
 $("#logout").addEventListener("click", async () => {
   await fetch("auth/logout", {method: "POST"});
   location.href = "login.html";
 });
 
-function render() {
+/* ------------------------------------------------------------ settings -- */
+function rowFor(key, spec) {
+  const row = el("div", "row");
+  const id = "f-" + key.replace(/\./g, "-");
+  const label = el("label", null, spec.title || key);
+  label.id = id + "-label";
+  label.htmlFor = id;
+  row.append(label);
+  if (spec.description) row.append(el("div", "desc", spec.description));
+
+  const status = el("div", "status");
+  const commit = v => save(key, v, status);
+  let control;
+
+  if (spec.enum) {
+    control = Combo({options: spec.enum, value: VALUES[key], onChange: commit,
+                     labelledBy: label.id});
+  } else if (spec.type === "boolean") {
+    control = Toggle({checked: VALUES[key], onChange: commit, labelledBy: label.id});
+  } else if (spec.type === "integer" || spec.type === "number") {
+    control = Stepper({value: VALUES[key], min: spec.minimum, max: spec.maximum,
+                       step: spec.type === "integer" ? 1 : 0.1, onChange: commit, id});
+  } else {
+    control = el("input", "input");
+    control.type = "text";
+    control.id = id;
+    control.value = VALUES[key] ?? "";
+    let t;
+    control.addEventListener("input", () => {
+      clearTimeout(t);
+      t = setTimeout(() => commit(control.value), 600);
+    });
+    control.setValue = v => { control.value = v ?? ""; };
+  }
+
+  CONTROLS[key] = control;
+  row.append(control, status, el("div", "key", key));
+  return row;
+}
+
+function renderSettings() {
   const groups = {};
   for (const [key, spec] of Object.entries(SCHEMA)) {
     const g = key.includes(".") ? key.split(".")[0] : "general";
@@ -140,134 +125,200 @@ function render() {
   }
   const root = $("#groups");
   root.textContent = "";
-  for (const [g, items] of Object.entries(groups)) {
-    const sec = document.createElement("section");
-    const h = document.createElement("h2");
-    h.textContent = titleOf(g);
-    sec.append(h);
-    for (const [key, spec] of items) sec.append(rowFor(key, spec));
+  for (const [name, items] of Object.entries(groups)) {
+    const sec = el("section", "panel");
+    sec.style.marginBottom = "1.1rem";
+    sec.append(el("h2", null, name));
+    items.forEach(([k, s]) => sec.append(rowFor(k, s)));
     root.append(sec);
   }
-}
-
-function rowFor(key, spec) {
-  const row = document.createElement("div");
-  row.className = "row";
-  const id = "f-" + key.replace(/\./g, "-");
-
-  const label = document.createElement("label");
-  label.htmlFor = id;
-  label.textContent = spec.title || key;
-  row.append(label);
-
-  if (spec.description) {
-    const d = document.createElement("div");
-    d.className = "desc";
-    d.textContent = spec.description;
-    row.append(d);
-  }
-
-  let input;
-  if (spec.enum) {
-    input = document.createElement("select");
-    for (const opt of spec.enum) {
-      const o = document.createElement("option");
-      o.value = o.textContent = opt;
-      input.append(o);
-    }
-    input.value = VALUES[key];
-  } else if (spec.type === "boolean") {
-    input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = !!VALUES[key];
-  } else if (spec.type === "number" || spec.type === "integer") {
-    input = document.createElement("input");
-    input.type = "number";
-    if (spec.minimum !== undefined) input.min = spec.minimum;
-    if (spec.maximum !== undefined) input.max = spec.maximum;
-    if (spec.type === "integer") input.step = 1;
-    input.value = VALUES[key];
-  } else {
-    input = document.createElement("input");
-    input.type = "text";
-    input.value = VALUES[key] ?? "";
-  }
-  input.id = id;
-
-  const status = document.createElement("div");
-  status.className = "status";
-
-  const read = () => spec.type === "boolean" ? input.checked
-    : (spec.type === "number") ? parseFloat(input.value)
-    : (spec.type === "integer") ? parseInt(input.value, 10)
-    : input.value;
-
-  let timer;
-  const commit = () => save(key, read(), status);
-  input.addEventListener("change", commit);
-  if (input.type === "text" || input.type === "number") {
-    input.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(commit, 600);
-    });
-  }
-
-  row.append(input, status);
-  const k = document.createElement("div");
-  k.className = "key";
-  k.textContent = key;
-  row.append(k);
-  return row;
 }
 
 async function save(key, value, status) {
   status.textContent = "saving…";
   status.className = "status";
-  const r = await api("settings/values", {
-    method: "PUT",
-    headers: {"content-type": "application/json"},
-    body: JSON.stringify({[key]: value}),
-  });
-  if (r.ok) {
-    VALUES = await r.json();
+  try {
+    VALUES = await send("settings/values", {[key]: value}, "PUT");
     status.textContent = "saved";
     status.className = "status ok";
     setTimeout(() => { status.textContent = ""; }, 1800);
     refreshHud();
-  } else {
-    const body = await r.json().catch(() => ({}));
-    status.textContent = body.detail || `error ${r.status}`;
+  } catch (e) {
+    status.textContent = e.message;
     status.className = "status err";
   }
 }
 
+/* ---------------------------------------------------------------- chat -- */
+function bubble(role, content) {
+  const m = el("div", "msg " + role);
+  m.append(el("div", "msg-role", role === "assistant" ? "IRiS" : role));
+  m.append(el("div", null, content));
+  return m;
+}
+
+function paintChat(messages) {
+  const log = $("#chat-log");
+  log.textContent = "";
+  for (const m of messages) {
+    if (m.role === "user") log.append(bubble("user", m.content));
+    else if (m.role === "tool") log.append(bubble("tool", `${m.tool_name} → ${m.content}`));
+    else if (m.role === "assistant" && (m.content || "").trim())
+      log.append(bubble("assistant", m.content));
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function thinkingBubble() {
+  const m = el("div", "msg assistant");
+  m.append(el("div", "msg-role", "IRiS"));
+  const t = el("div", "thinking");
+  t.append(el("i"), el("i"), el("i"));
+  m.append(t);
+  return m;
+}
+
+async function sendMessage() {
+  const box = $("#composer");
+  const text = box.value.trim();
+  if (!text || BUSY) return;
+  BUSY = true;
+  $("#send").disabled = true;
+  box.value = "";
+  box.style.height = "auto";
+
+  const log = $("#chat-log");
+  log.append(bubble("user", text));
+  const pending = thinkingBubble();
+  log.append(pending);
+  log.scrollTop = log.scrollHeight;
+
+  try {
+    const r = await send("chat/message", {content: text, conversation_id: CONV});
+    CONV = r.conversation_id;
+    paintChat(r.messages);
+    loadConversations();
+  } catch (e) {
+    pending.remove();
+    const err = bubble("tool", "error: " + e.message);
+    log.append(err);
+  } finally {
+    BUSY = false;
+    $("#send").disabled = false;
+    box.focus();
+  }
+}
+
+$("#send").addEventListener("click", sendMessage);
+$("#composer").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$("#composer").addEventListener("input", e => {
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 144) + "px";
+});
+$("#new-chat").addEventListener("click", () => {
+  CONV = null;
+  paintChat([]);
+  $("#composer").focus();
+});
+$("#del-chat").addEventListener("click", async () => {
+  if (!CONV) return;
+  await api(`chat/conversations/${CONV}`, {method: "DELETE"});
+  CONV = null;
+  paintChat([]);
+  loadConversations();
+});
+
+async function openConversation(id) {
+  CONV = id;
+  paintChat((await json(`chat/conversations/${id}`)).messages);
+}
+
+async function loadConversations({selectLatest = false} = {}) {
+  const convs = await json("chat/conversations");
+  const picker = $("#conv-picker");
+  picker.textContent = "";
+  if (!convs.length) {
+    picker.append(el("div", "key", "no conversations yet"));
+    return;
+  }
+  // On first load the picker would otherwise name a conversation the log is not
+  // showing, so open the most recent one rather than leaving a blank transcript.
+  if (selectLatest && !CONV) await openConversation(convs[0].id);
+
+  picker.append(Combo({
+    options: convs.map(c => c.title),
+    value: convs.find(c => c.id === CONV)?.title ?? convs[0].title,
+    onChange: title => {
+      const hit = convs.find(c => c.title === title);
+      if (hit) openConversation(hit.id);
+    },
+  }));
+}
+
+/* ------------------------------------------------------------ activity -- */
+async function loadActivity() {
+  const list = $("#activity-list");
+  try {
+    const rows = await json("activity");
+    list.textContent = "";
+    if (!rows.length) {
+      list.append(el("div", "empty", "Nothing recorded yet."));
+      return;
+    }
+    for (const r of rows) {
+      const row = el("div", "log-row");
+      row.append(el("span", "log-when", new Date(r.at).toLocaleString()));
+      row.append(el("span", "log-what", r.action));
+      row.append(el("span", "log-detail",
+                    (r.actor ? r.actor + " · " : "") + (r.detail || "")));
+      list.append(row);
+    }
+  } catch (e) {
+    list.textContent = "";
+    list.append(el("div", "empty", e.message));
+  }
+}
+
+/* ---------------------------------------------------------------- boot -- */
 async function refreshHud() {
   $("#hud-model").textContent = VALUES["llm.model"] ?? "—";
   $("#hud-think").textContent = VALUES["llm.think"] ?? "—";
   try {
-    const h = await api("health").then(r => r.json());
+    const h = await json("health");
     $("#hud-ollama").textContent = h.ollama_ok ? "up" : "down";
   } catch { $("#hud-ollama").textContent = "unreachable"; }
 }
 
-// Live sync across devices (SPEC 3.1)
 function listen() {
   const es = new EventSource("settings/stream");
   es.onopen = () => { $("#dot").className = "dot live"; $("#conn").textContent = "live"; };
   es.onerror = () => { $("#dot").className = "dot down"; $("#conn").textContent = "reconnecting"; };
   es.onmessage = e => {
     Object.assign(VALUES, JSON.parse(e.data));
-    for (const [key, spec] of Object.entries(SCHEMA)) {
-      const el = document.getElementById("f-" + key.replace(/\./g, "-"));
-      if (!el || el === document.activeElement) continue;   // don't yank a field being edited
-      if (spec.type === "boolean") el.checked = !!VALUES[key];
-      else el.value = VALUES[key] ?? "";
+    for (const [key, control] of Object.entries(CONTROLS)) {
+      if (control.contains && control.contains(document.activeElement)) continue;
+      if (control === document.activeElement) continue;
+      control.setValue?.(VALUES[key]);
     }
     refreshHud();
   };
 }
 
-load().then(listen);
+(async function boot() {
+  const [s, v, me] = await Promise.all([
+    json("settings/schema"), json("settings/values"), json("auth/me"),
+  ]);
+  SCHEMA = s.properties || {};
+  VALUES = v;
+  $("#hud-user").textContent = `${me.username} · ${me.role}`;
+  renderSettings();
+  refreshHud();
+  loadConversations({selectLatest: true});
+  listen();
+  $("#composer").focus();
+})();
 </script>
 </body>
 </html>

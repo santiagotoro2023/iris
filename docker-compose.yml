@@ -27,6 +27,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Redis holds conversations, not just sessions — real user content that must
+    # survive a container recreate, so it gets AOF persistence and a volume.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - ./data/redis:/data
     ports:
       - "127.0.0.1:6379:6379"
 

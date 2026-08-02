@@ -13,7 +13,8 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
-DATA_DIRS=(data/postgres data/qdrant data/ollama data/media data/mosquitto/data data/mosquitto/log)
+DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/media
+           data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!!\033[0m %s\n' "$*" >&2; }
