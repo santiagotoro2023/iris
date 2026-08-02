@@ -44,9 +44,10 @@ services:
       REDIS_URL: redis://redis:6379
       STT_URL: http://stt:8001
       TTS_URL: http://tts:8002
+      SEARXNG_URL: http://searxng:8080
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
-      IRIS_THINK: ${IRIS_THINK:-false}
+      IRIS_THINK: ${IRIS_THINK:-}
       IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-0}
     depends_on:
       ollama:
@@ -79,12 +80,22 @@ services:
       - nvidia.com/gpu=all
     environment:
       TTS_ENGINE: ${TTS_ENGINE:-piper}
-      TTS_SPEAKER: ${TTS_SPEAKER:-en_GB-jenny_dioco-medium}
+      TTS_SPEAKER: ${TTS_SPEAKER:-en_GB-cori-high}
       TTS_DEVICE: ${TTS_DEVICE:-cuda}
     volumes:
       - ./data/tts:/models
     ports:
       - "127.0.0.1:8002:8002"
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./data/searxng:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+    ports:
+      - "127.0.0.1:8080:8080"
 
   ollama:
     image: ollama/ollama:latest

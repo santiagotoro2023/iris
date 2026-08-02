@@ -149,9 +149,13 @@ curl -X POST localhost:8000/infer -H 'content-type: application/json' \
   -d '{"messages":[{"role":"user","content":"what time is it?"}]}'
 ```
 
-The model (`qwen3:8b`) reasons before answering only when asked: `"think": true`
-buys accuracy on hard questions at roughly 40 s instead of 3 s. Default is off.
-Tools are registered with the `@tool` decorator in `api/main.py`.
+Reasoning mode defaults to `model-default`, letting qwen3 decide; `never` and `always`
+are also available. Tools are registered with the `@tool` decorator in `api/reasoning.py`.
+
+IRiS **searches rather than guesses**: a `web_search` tool backed by self-hosted SearXNG,
+which it is instructed to use for any company, person, product, place or date it is not
+certain of. The transcript shows what it is searching for while it happens, then lists the
+sources it used. Its persona lives in `api/persona.py` and is editable in Settings.
 
 ## Services
 
@@ -163,6 +167,8 @@ Tools are registered with the `@tool` decorator in `api/main.py`.
 | `qdrant` | 6333 | vector memory |
 | `redis` | 6379 | session state |
 | `stt` | 8001 | speech-to-text, GPU |
+| `tts` | 8002 | text-to-speech (Piper/XTTS) |
+| `searxng` | 8080 | self-hosted web search |
 | `mqtt` | 1883 | event bus |
 
 Redis runs with AOF persistence into `./data/redis` — it holds conversations, not

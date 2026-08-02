@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import auth
 import main
 import persona
+import reasoning
 import settings
 import voice
 
@@ -102,9 +103,17 @@ def test_runaway_tool_loop_is_capped():
     assert "tool loop exceeded" in r.json()["detail"]
 
 
-def test_think_defaults_off_and_is_overridable_per_request():
+def test_think_follows_the_setting_and_the_per_request_override():
+    """Default is 'model-default', which omits the flag and lets qwen3 decide."""
     post = fake_ollama(text_round("hi"))
     with patch("httpx.AsyncClient.stream", post):
+        TestClient(main.app).post("/infer", json={"messages": [
+            {"role": "user", "content": "x"}]})
+    assert "think" not in post.sent[0], post.sent[0]
+
+    post = fake_ollama(text_round("hi"))
+    with patch.dict(settings._overrides, {"llm.think": "never"}), \
+         patch("httpx.AsyncClient.stream", post):
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}]})
     assert post.sent[0]["think"] is False, post.sent[0]
@@ -114,6 +123,25 @@ def test_think_defaults_off_and_is_overridable_per_request():
         TestClient(main.app).post("/infer", json={"messages": [
             {"role": "user", "content": "x"}], "think": True})
     assert post.sent[0]["think"] is True, post.sent[0]
+
+
+def test_em_dashes_never_reach_the_client():
+    """Santiago does not want them anywhere (SPEC.md 18)."""
+    with patch("httpx.AsyncClient.stream",
+               fake_ollama(text_round("a thought, interrupted, and resumed"))):
+        r = TestClient(main.app).post("/infer", json={"messages": [
+            {"role": "user", "content": "x"}]})
+    assert "\u2014" not in r.json()["message"]["content"]
+    assert reasoning.strip_dashes("one\u2014two") == "one, two"
+    assert reasoning.strip_dashes("one \u2013 two") == "one, two"
+
+
+def test_web_search_tool_is_registered():
+    """IRiS must search rather than guess (SPEC.md 18)."""
+    assert "web_search" in reasoning.TOOLS
+    schema = reasoning.TOOLS["web_search"][0]["function"]
+    assert "query" in schema["parameters"]["properties"]
+    assert "search" in schema["description"].lower()
 
 
 def test_think_omitted_for_non_thinking_models():
@@ -148,7 +176,9 @@ def test_stream_emits_deltas_before_completion():
         events = asyncio.run(collect())
 
     kinds = [e["type"] for e in events]
-    assert kinds[0] == "tool", kinds
+    # tool_start fires before the tool runs, so the client can show what it is doing.
+    assert kinds[0] == "tool_start", kinds
+    assert kinds[1] == "tool", kinds
     assert kinds[-1] == "done", kinds
     deltas = [e["text"] for e in events if e["type"] == "delta"]
     assert len(deltas) > 1, "reply arrived in one lump instead of streaming"

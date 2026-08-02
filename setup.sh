@@ -13,7 +13,8 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
-DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts data/media
+DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
+           data/searxng data/media
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -113,6 +114,15 @@ add_env() {
   log "  .env: added $1"
 }
 
+# SearXNG needs a secret in its config file. Generated here so it never enters the repo.
+ensure_searxng() {
+  local cfg=data/searxng/settings.yml
+  [ -f "$cfg" ] && return 0
+  log "Writing SearXNG config with a generated secret..."
+  sed "s|__SECRET__|$(openssl rand -hex 32)|" searxng/settings.template.yml > "$cfg"
+  chmod 600 "$cfg"
+}
+
 ensure_env() {
   mkdir -p "${DATA_DIRS[@]}"
   have openssl || die "openssl is required to generate the database password."
@@ -126,7 +136,7 @@ ensure_env() {
   add_env POSTGRES_DB iris
   add_env IRIS_MODEL "$MODEL_DEFAULT"
   add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
-  add_env IRIS_THINK false
+  add_env IRIS_THINK ""
 }
 
 wait_for_ollama() {
@@ -175,6 +185,7 @@ install() {
   setup_gpu
   setup_tailscale
   ensure_env
+  ensure_searxng
   log "Building and starting services..."
   dc up -d --build
   wait_for_ollama

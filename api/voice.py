@@ -47,7 +47,7 @@ def _tts_speakers() -> list[str]:
     current = (settings.get("voice.tts_speaker")
                if "voice.tts_speaker" in settings.REGISTRY else None)
     listed = list(_speakers_cache[2])
-    for extra in (current, os.environ.get("TTS_SPEAKER", "en_GB-jenny_dioco-medium")):
+    for extra in (current, os.environ.get("TTS_SPEAKER", "en_GB-cori-high")):
         if extra and extra not in listed:
             listed.append(extra)
     # British voices first — the whole reason for offering Piper.
@@ -106,7 +106,7 @@ settings.setting(
                 "up with playback.")
 settings.setting(
     "voice.tts_speaker", type="string", enum=_tts_speakers,
-    default=os.environ.get("TTS_SPEAKER", "en_GB-jenny_dioco-medium"),
+    default=os.environ.get("TTS_SPEAKER", "en_GB-cori-high"),
     title="Voice",
     description="Built-in speaker for the selected engine. en_GB voices are listed "
                 "first. Use the preview button to audition one.")
@@ -115,7 +115,7 @@ settings.setting(
     default="en", title="Speaking language",
     description="XTTS renders the same voice in each supported language.")
 settings.setting(
-    "voice.tts_speed", type="number", minimum=0.5, maximum=1.6, default=1.2,
+    "voice.tts_speed", type="number", minimum=0.5, maximum=1.6, default=1.1,
     title="Speaking pace",
     description="1.0 is natural. Lower is more deliberate, higher is brisker.")
 settings.setting(

@@ -1,0 +1,20 @@
+# Template. setup.sh copies this to data/searxng/settings.yml with a generated
+# secret, so the secret never lands in the repo (SPEC.md 7).
+use_default_settings: true
+
+server:
+  secret_key: "__SECRET__"
+  # Bound to localhost and reachable only by the API container, so the rate limiter
+  # would only ever throttle IRiS itself.
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true

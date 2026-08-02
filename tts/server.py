@@ -27,7 +27,7 @@ os.environ.setdefault("COQUI_TOS_AGREED", "1")  # XTTS v2 ships under the CPML
 MODELS = Path(os.environ.get("TTS_HOME", "/models"))
 XTTS_MODEL = os.environ.get("TTS_MODEL", "tts_models/multilingual/multi-dataset/xtts_v2")
 DEFAULT_ENGINE = os.environ.get("TTS_ENGINE", "piper")
-DEFAULT_SPEAKER = os.environ.get("TTS_SPEAKER", "en_GB-jenny_dioco-medium")
+DEFAULT_SPEAKER = os.environ.get("TTS_SPEAKER", "en_GB-cori-high")
 DEFAULT_DEVICE = os.environ.get("TTS_DEVICE", "cuda")
 IDLE_UNLOAD = float(os.environ.get("TTS_IDLE_UNLOAD", "300"))
 

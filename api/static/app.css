@@ -37,8 +37,22 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------ chrome ---- */
 .shell { position: relative; z-index: 1; display: flex; flex-direction: column;
-         height: 100%; max-width: 880px; margin: 0 auto; padding: 0 1rem; }
-.topbar { display: flex; align-items: center; gap: .7rem; padding: 1.1rem 0 .6rem; }
+         height: 100dvh; max-width: 880px; margin: 0 auto; padding: 0 1rem;
+         overflow: hidden; }
+/* Chrome stays put; the transcript is the only thing that scrolls. */
+.topbar, .hud, .tabs { flex: none; }
+.topbar { display: flex; align-items: center; gap: .8rem; padding: 1rem 0 .7rem; }
+.brand-mark { flex: none; }
+.user { display: flex; align-items: center; gap: .6rem; border: 1px solid var(--line);
+        background: var(--panel); padding: .3rem .35rem .3rem .7rem; }
+.user-id { display: flex; flex-direction: column; line-height: 1.15; }
+.user-name { font-size: .82rem; color: var(--text); }
+.user-role { font-family: var(--mono); font-size: .58rem; letter-spacing: .16em;
+             text-transform: uppercase; color: var(--dim); }
+.iconbtn { display: grid; place-items: center; width: 1.85rem; height: 1.85rem;
+           border: 1px solid var(--line); background: #0b0c0e; color: var(--dim);
+           cursor: pointer; }
+.iconbtn:hover { color: var(--orange); border-color: var(--orange); }
 .wordmark { font-size: 1.15rem; letter-spacing: .14em; text-transform: uppercase;
             margin: 0; font-weight: 600; }
 .wordmark span { color: var(--orange); }
@@ -62,7 +76,10 @@ button { font: inherit; color: inherit; }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] { color: var(--orange); border-bottom-color: var(--orange); }
 
-.view { flex: 1; min-height: 0; display: none; flex-direction: column; padding-bottom: 1.5rem; }
+.view { flex: 1; min-height: 0; display: none; flex-direction: column;
+        padding-bottom: 1rem; }
+/* Chat manages its own inner scroll; the other views scroll as a whole. */
+.view.active:not(#view-chat) { overflow-y: auto; }
 .view.active { display: flex; }
 
 .ghost { background: none; border: 1px solid var(--line); color: var(--dim);
@@ -97,7 +114,7 @@ button { font: inherit; color: inherit; }
                    resize: vertical; min-height: 8rem; white-space: pre-wrap; }
 
 /* the mark stands in for the "IRiS" label on assistant bubbles */
-.bubble-mark { display: block; flex: none; }
+.bubble-mark { display: block; flex: none; width: 30px; height: 30px; }
 
 /* combobox: replaces <select> entirely */
 .combo { position: relative; }
@@ -179,7 +196,7 @@ button { font: inherit; color: inherit; }
 .conv-empty { padding: 1.2rem .6rem; color: var(--dim); font-size: .76rem;
               text-align: center; line-height: 1.5; }
 
-.chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
             gap: .9rem; padding: .3rem .1rem 1rem; }
 .msg { max-width: 84%; padding: .6rem .8rem; border: 1px solid var(--line);
        font-size: .9rem; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }
@@ -187,19 +204,29 @@ button { font: inherit; color: inherit; }
 .msg.assistant { align-self: flex-start; background: var(--panel); }
 .msg.tool { align-self: flex-start; font-family: var(--mono); font-size: .72rem;
             color: var(--dim); background: none; border-style: dashed; max-width: 100%; }
-.msg-role { display: flex; align-items: center; gap: .4rem;
+.msg.tool.searching { border-color: var(--cool); color: var(--cool); }
+.tool-line { display: flex; align-items: center; gap: .5rem; }
+.tool-detail { color: var(--dim); font-size: .68rem; margin-top: .3rem;
+               white-space: pre-wrap; max-height: 7rem; overflow-y: auto; }
+.tool-sources { display: flex; flex-wrap: wrap; gap: .3rem .5rem; margin-top: .4rem; }
+.tool-source { color: var(--cool); font-size: .68rem; text-decoration: none;
+               border-bottom: 1px dotted currentColor; max-width: 22rem;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-source:hover { color: var(--orange); }
+.msg-role { display: flex; align-items: center; gap: .55rem; min-height: 30px;
             font-family: var(--mono); font-size: .62rem; letter-spacing: .14em;
             text-transform: uppercase; color: var(--dim); margin-bottom: .3rem; }
 .speak { border: 0; background: none; color: var(--dim); cursor: pointer;
-         padding: 0; line-height: 0; opacity: .55; }
+         padding: 0; line-height: 0; opacity: .6; }
+.speak svg { width: 24px; height: 24px; }
 .speak:hover { color: var(--orange); opacity: 1; }
 .speak.busy { color: var(--orange); opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
   .speak.busy { animation: pulse 1.2s ease-in-out infinite; }
 }
 .msg.assistant .msg-role { color: var(--orange); }
-.composer { display: flex; gap: .5rem; align-items: flex-end;
-            border-top: 1px solid var(--line); padding-top: .7rem; }
+.composer { flex: none; display: flex; gap: .5rem; align-items: flex-end;
+            border-top: 1px solid var(--line); padding: .7rem 0 0; background: var(--bg); }
 .composer textarea { flex: 1; resize: none; min-height: 2.5rem; max-height: 9rem;
                      padding: .55rem .65rem; background: #0b0c0e; color: var(--text);
                      border: 1px solid var(--line); font-family: var(--sans);

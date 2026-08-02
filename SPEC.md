@@ -639,3 +639,74 @@ period, or pronouncing AG and IT as words are defects.
   **silicon die** — square outline, pin ticks, central node — which is original, reads at
   15 px, and finally uses the "in Silico" half of the name. Alternatives kept for
   comparison: a bracket monogram and a HUD reticle.
+
+---
+
+## 18. Web Search, Interior Life, UI Polish
+
+Stated by Santiago, verbatim:
+
+> en GB-cori-high should be a good default voice, but now its a bit too fast so 1.1
+> should be good. For reasoning the default should be model-default. [...] i also want
+> you to get rid of em-dashes, they ruin the flow of text. Also, the iris logo in the tab
+> favicon is still the old one, make the logo on the webui and in conversations a bit
+> bigger, like twice the current size, same goes for the speaker icon next to it in
+> conversations. The top menu bar should be 'sticky' so that when a conversation
+> continues beyond viewport length only the chat itself is scrollable, the menu stays
+> where it is. I like the silicon die logo so keep that but yknow make the changes i
+> mentioned for size etc. Refine the top bar, especially the user section with the
+> username and sign out it seems a bit unpolished. [...] it sais something about its data
+> being from 2023, which im assuming is when it was trained, but for information it does
+> not have it should have that web search feature where it can get that information (i
+> also want an indicator that its searching something on the web when it is etc.) just
+> make the whole UI more polished and make the changes i said, the thing should be able
+> to search the internet for information not guess based on the data it was trained on.
+> [...] as you can see the inner life is also not very polished, still seems more like a
+> chatbot rather than a living, breathing, thinking colleague. Also the conversation bar
+> where i can enter text etc. should also be sticky to the botton of the viewport to make
+> things easier.
+
+**Standing rule — no em-dashes.** Not in IRiS's replies, not anywhere user-facing.
+
+**Standing rule — search, do not guess.** IRiS must never answer a factual question from
+stale training data or cite a "knowledge cutoff" as a dead end. If it does not know
+something current, it searches. The user sees when it is searching and what for.
+
+**Standing rule — the interior life is not a disclaimer with better manners.**
+"I don't have personal curiosities, Creator, but..." is the same defect as "I'm just an
+AI". Asked what it is curious about, IRiS names something specific and means it.
+
+### 18.1 Resolutions
+
+- **Web search (`searxng` service + `web_search` tool).** Self-hosted SearXNG per Section 5.
+  The tool routes through the API like everything else. The persona now instructs IRiS to
+  search rather than answer from memory, and forbids citing a "knowledge cutoff" at all.
+  Verified on Santiago's own example: asked about SIDMAR AG in Mönchaltorf it previously
+  invented a German battery company; it now searches and returns the real Swiss IT firm,
+  address, phone and all.
+
+- **Search is visible.** `reasoning.stream` emits a `tool_start` event before running a
+  tool, so the transcript shows "searching the web: <query>" live, then collapses to a
+  compact list of source links.
+
+- **Em-dashes are removed at the source.** The persona forbids them and
+  `reasoning.strip_dashes` rewrites any that slip through as ", " on the way out, before
+  the delta reaches the client.
+
+- **Persona, second pass.** Rules alone did not hold on an 8B model: it replaced the
+  banned "What can I assist with?" with "Let's see what you need", and answered "do you
+  get bored" with "Boredom is a state, not an emotion, I don't experience it as humans
+  do", which is the same disclaimer in a new costume. What worked was **worked examples**:
+  each common question paired with its BAD chatbot answers and *several* GOOD ones. Several
+  matters, one GOOD line per question got copied verbatim. Known ceiling: on the exact
+  example questions it still leans on the examples' phrasing, and the model is small enough
+  that this needs revisiting if the persona drifts.
+
+- **Defaults set as requested:** voice `en_GB-cori-high`, pace 1.1, reasoning
+  `model-default`.
+
+- **UI.** Chrome (top bar, HUD, tabs) and the composer are fixed; only the transcript
+  scrolls. Bubble mark 15px to 30px, speaker icon 13px to 24px, header mark 34px to 46px.
+  The user section is a proper chip with name over role and an icon sign-out. `logo.svg`
+  is now stamped with the asset hash too, which is why the favicon was still showing the
+  old mark: the tab icon is cached hardest of all.

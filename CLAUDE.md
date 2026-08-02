@@ -19,7 +19,7 @@ Host: stzrhws01 (RTX 3060 Ti, 8GB VRAM). Data/media volumes: `./data/` (gitignor
 - [ ] Phase 3 — Memory System
 - [ ] Phase 4 — Home Cameras
 - [ ] Phase 5 — Shared Frontend & Client Apps
-- [ ] Phase 6 — Integrations & Tools
+- [~] Phase 6 — Integrations & Tools: **web search done** (`searxng` service + `web_search` tool). Email/calendar/WhatsApp/transit/location not started
 - [ ] Phase 7 — Proactive Engine
 - [~] Phase 8 — Personality & Self-Awareness: persona pulled forward (`api/persona.py`, editable in Settings). Self-inspection and self-modification not started
 - [ ] Phase 9 — Branding

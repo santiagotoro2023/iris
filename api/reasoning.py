@@ -5,6 +5,7 @@ there is one place where IRiS thinks, not two that drift (SPEC.md Phase 1).
 """
 import json
 import os
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,7 @@ import persona
 import settings
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 MAX_TOOL_HOPS = 5
 
 # name -> (ollama tool schema, callable). Later phases register integrations here.
@@ -36,6 +38,40 @@ def tool(name: str, description: str, parameters: dict):
       {"type": "object", "properties": {}})
 def _current_time():
     return datetime.now(ZoneInfo(settings.get("general.timezone"))).isoformat(timespec="seconds")
+
+
+@tool("web_search",
+      "Search the live web. Use this whenever the answer depends on anything you are "
+      "not certain of: current events, a specific company, person, product, place, "
+      "price, version or date. Prefer searching over answering from memory.",
+      {"type": "object",
+       "properties": {"query": {"type": "string",
+                                "description": "Search terms. Include distinguishing "
+                                               "detail such as a place or industry."}},
+       "required": ["query"]})
+def _web_search(query: str):
+    r = httpx.get(f"{SEARXNG_URL}/search",
+                  params={"q": query, "format": "json"}, timeout=25)
+    if r.status_code != 200:
+        return f"search failed: HTTP {r.status_code}"
+    results = (r.json().get("results") or [])[:6]
+    if not results:
+        return f"No results for {query!r}."
+    lines = []
+    for item in results:
+        snippet = (item.get("content") or "").strip().replace("\n", " ")
+        lines.append(f"- {item.get('title', '').strip()} <{item.get('url', '')}>\n"
+                     f"  {snippet[:300]}")
+    return "\n".join(lines)
+
+
+# Santiago does not want em-dashes anywhere (SPEC.md 18). The persona forbids them; this
+# is the safety net for when the model reaches for one anyway.
+_EM_DASH = re.compile(r"\s*[—–]\s*")
+
+
+def strip_dashes(text: str) -> str:
+    return _EM_DASH.sub(", ", text)
 
 
 def resolve_think(explicit: bool | None) -> bool | None:
@@ -104,8 +140,9 @@ async def stream(messages: list[dict], model: str | None = None,
                         continue
                     msg = chunk.get("message") or {}
                     if msg.get("content"):
-                        parts.append(msg["content"])
-                        yield {"type": "delta", "text": msg["content"]}
+                        piece = strip_dashes(msg["content"])
+                        parts.append(piece)
+                        yield {"type": "delta", "text": piece}
                     if msg.get("tool_calls"):
                         tool_calls.extend(msg["tool_calls"])
                     if chunk.get("done"):
@@ -121,6 +158,9 @@ async def stream(messages: list[dict], model: str | None = None,
                 return
 
             for call in tool_calls:
+                fn = call.get("function", {})
+                yield {"type": "tool_start", "name": fn.get("name", "?"),
+                       "arguments": fn.get("arguments", {})}
                 name, result = _run_tool(call)
                 messages.append({"role": "tool", "tool_name": name, "content": result})
                 yield {"type": "tool", "name": name, "content": result}

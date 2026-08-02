@@ -54,7 +54,7 @@ settings.setting(
 settings.setting(
     "llm.think", type="string", enum=["never", "always", "model-default"],
     default={"true": "always", "false": "never"}.get(
-        os.environ.get("IRIS_THINK", "false").strip().lower(), "model-default"),
+        os.environ.get("IRIS_THINK", "").strip().lower(), "model-default"),
     title="Reasoning mode",
     description="Reason before answering. 'always' is far more accurate on hard "
                 "questions and far slower; 'never' keeps replies conversational.")
@@ -138,7 +138,7 @@ def _stamp_assets() -> str:
     so there is nothing stale to serve.
     """
     digest = hashlib.md5()
-    for name in ("app.css", "app.js"):
+    for name in ("app.css", "app.js", "logo.svg"):
         path = _static / name
         if path.exists():
             digest.update(path.read_bytes())
@@ -147,7 +147,8 @@ def _stamp_assets() -> str:
 
 def _page(name: str) -> HTMLResponse:
     html = (_static / name).read_text()
-    for asset in ("app.css", "app.js"):
+    # logo.svg is stamped too: the tab favicon is cached hardest of all.
+    for asset in ("app.css", "app.js", "logo.svg"):
         html = html.replace(f'"{asset}"', f'"{asset}?v={_ASSET_VERSION}"')
     # The shell itself is never cached, so a new version is always picked up.
     return HTMLResponse(html, headers={"cache-control": "no-store"})
