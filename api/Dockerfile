@@ -3,7 +3,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
       fastapi==0.115.6 uvicorn==0.34.0 httpx==0.28.1 \
       "psycopg[binary]==3.2.3" jsonschema==4.23.0 redis==5.2.1 \
-      python-multipart==0.0.20 pypdf==5.1.0 python-docx==1.1.2
+      python-multipart==0.0.20 pypdf==5.1.0 python-docx==1.1.2 pillow==11.0.0
 COPY main.py settings.py auth.py reasoning.py persona.py activity.py chat.py \
      voice.py files.py ./
 COPY static ./static

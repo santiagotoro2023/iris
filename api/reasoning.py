@@ -19,6 +19,19 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 MAX_TOOL_HOPS = 5
 
+SEARCH_POLICY = {
+    "aggressive": "SEARCH POLICY: aggressive. Search the web for essentially any question "
+                  "of fact, including ones you believe you know. Your training data is "
+                  "old and frequently wrong about releases, versions, companies and "
+                  "people. Searching is cheap and fast. When in doubt, search.",
+    "balanced":   "SEARCH POLICY: balanced. Search when a question involves anything "
+                  "specific, recent or verifiable, and answer directly only for stable "
+                  "general knowledge.",
+    "sparing":    "SEARCH POLICY: sparing. Search only when you genuinely cannot answer "
+                  "or the question is explicitly about current events.",
+    "off":        "SEARCH POLICY: web search is disabled. Say so if a question needs it.",
+}
+
 # name -> (ollama tool schema, callable). Later phases register integrations here.
 TOOLS: dict[str, tuple[dict, callable]] = {}
 
@@ -70,11 +83,15 @@ def _web_search(query: str):
 
 # Santiago does not want em-dashes anywhere (SPEC.md 18). The persona forbids them; this
 # is the safety net for when the model reaches for one anyway.
-_EM_DASH = re.compile(r"\s*[—–]\s*")
+_EM_DASH = re.compile(r"(?<=\d)\s*[—–]\s*(?=\d)|\s*[—–]\s*")
 
 
 def strip_dashes(text: str) -> str:
-    return _EM_DASH.sub(", ", text)
+    # A dash between digits is a range ("51-200"), not a clause break. Turning it into
+    # a comma invented a second number.
+    return _EM_DASH.sub(
+        lambda m: "-" if (m.group(0).strip() and m.start() and
+                          text[m.start() - 1:m.start()].isdigit()) else ", ", text)
 
 
 # Ollama only understands these keys; anything else we store for our own use must be
@@ -130,9 +147,22 @@ async def stream(messages: list[dict], model: str | None = None,
     # IRiS is a character, not a chat completion (SPEC.md 17). The persona is sent with
     # every request but kept OUT of the stored transcript, so editing it takes effect on
     # existing conversations instead of being frozen in at creation time.
+    policy = settings.get("llm.search_policy")
     system = None
     if not any(m.get("role") == "system" for m in messages):
         system = persona.system_message()
+        if system:
+            # Without today's date the model anchors on its training year: it searched
+            # for "Subnautica 2 release status 2023" and then answered "as of 2023".
+            today = datetime.now(ZoneInfo(settings.get("general.timezone")))
+            stamp = today.strftime("Today is %A, %d %B %Y.")
+            system = {**system, "content": "\n\n".join(
+                [system["content"], stamp, SEARCH_POLICY[policy],
+                 "Never put a year in a search query unless the user asked about that "
+                 "year, and never describe your answer as being 'as of' any year."])}
+
+    tools = [schema for name, (schema, _) in TOOLS.items()
+             if not (name == "web_search" and policy == "off")]
 
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):
@@ -140,7 +170,7 @@ async def stream(messages: list[dict], model: str | None = None,
                     "messages": [for_model(m)
                                  for m in (([system] + messages) if system
                                            else messages)],
-                    "tools": [schema for schema, _ in TOOLS.values()],
+                    "tools": tools,
                     "stream": True}
             if think is not None:
                 body["think"] = think

@@ -184,14 +184,21 @@ def speech_text(text: str) -> str:
 
     text = _ACRONYM.sub(_spell_acronym, text)
 
+    # "CubeServ AG (a Swiss firm)" ran straight into the bracket with no breath.
+    text = re.sub(r"(?<=[^\s,;:.!?])\s*\(", ", (", text)
     text = _BLANKS.sub(". ", text)
-    text = text.replace("\n", " ")
+    lines = [ln.strip() for ln in text.split("\n")]
+    lines = [ln if not ln or ln[-1] in ".!?…,;:" else ln + "." for ln in lines]
+    text = " ".join(ln for ln in lines if ln)
     text = _WS.sub(" ", text).strip()
 
     if text and text[-1] not in ".!?…,;:":
         text += "."
-    # XTTS clips the tail of an utterance; a trailing pause gives it room to finish.
-    return text + " …" if text else text
+    if not text:
+        return text
+    # XTTS clips the tail, so it needs trailing room. Piper does not, and the extra
+    # ellipsis made it trail off into a mumble.
+    return text + " …" if settings.get("voice.engine") == "xtts" else text
 
 
 @router.get("/status")

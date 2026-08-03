@@ -60,6 +60,13 @@ settings.setting(
     description="Reason before answering. 'always' is far more accurate on hard "
                 "questions and far slower; 'never' keeps replies conversational.")
 settings.setting(
+    "llm.search_policy", type="string",
+    enum=["aggressive", "balanced", "sparing", "off"], default="aggressive",
+    title="Web search",
+    description="How readily IRiS checks the web. Training data goes stale, searches are "
+                "fast, so 'aggressive' is the default: it looks things up rather than "
+                "trusting its memory.")
+settings.setting(
     "general.timezone", type="string",
     enum=lambda: sorted(zoneinfo.available_timezones()),
     default=os.environ.get("IRIS_TZ", "Europe/Zurich"),

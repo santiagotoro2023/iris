@@ -785,3 +785,42 @@ Stated by Santiago, verbatim:
   `2026-08-03T01:44+02:00` and said "3 PM"; it now gets
   "01:45 on Monday, 03 August 2026 (Europe/Zurich, 24-hour clock)". The clock itself was
   always correct: host 01:44 CEST, container 23:44 UTC, same instant.
+
+---
+
+## 20. Search Aggressiveness, Speech Prosody, Rendering
+
+- **Scrolling "sometimes stopped" because inner boxes stole the wheel.** The search-source
+  list, tool detail and attachment body each had their own `max-height` + `overflow-y`, so
+  hovering one latched scrolling to it. They now grow naturally; the transcript is the only
+  scroller. Verified zero inner scroll containers in the log.
+
+- **`51–200` became `51, 200`.** The em-dash filter treated a numeric range as a clause
+  break, inventing a second number. A dash between digits is now a hyphen.
+
+- **The model anchored on its training year.** Given no date it searched "Subnautica 2
+  release status 2023" and answered "as of 2023". The system turn now carries today's date
+  and forbids putting a year in a query or saying "as of <year>". It then searched
+  ...2026 and reported the real Early Access date.
+
+- **`llm.search_policy`**, default **aggressive**: search essentially any question of fact,
+  including ones it believes it knows. Also balanced / sparing / off; `off` removes the
+  tool entirely rather than just discouraging it.
+
+- **Speech prosody.** A comma is inserted before an unpunctuated "(", every line ends with
+  a stop so numbered steps do not run together, and the trailing ellipsis is now XTTS-only,
+  which is what made Piper trail off into a mumble.
+
+- **Markdown blocks render.** Bullets, numbered lists and headings were shown literally;
+  now rendered as DOM nodes alongside the existing bold/italic/code.
+
+- **Attachments sit inside the message container**, below the text, stacked, separated by a
+  rule. Images in formats the vision model rejects (webp, bmp, tiff) are converted to PNG
+  first, which is what caused "Failed to load image or audio file".
+
+- **Not built, deliberately.** Reverse image search and identifying people from photographs
+  are face-recognition capabilities and are not being added. What does work: the vision
+  model reads logos, text and landmarks in a picture, and IRiS then searches for those, as
+  it did with the SIDMAR logo. German words spoken by an English Piper voice will stay
+  wrong; the phonemiser is English-only, so fixing it properly means routing German text to
+  a German voice.

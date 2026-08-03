@@ -266,7 +266,6 @@ function addSpeakButton(head, getText) {
 const INLINE = /(\*\*|__)(\S(?:[^\n]*?\S)?)\1|(?<![*\w])\*(\S(?:[^\n]*?\S)?)\*(?![*\w])|`([^`\n]+)`/g;
 
 function renderInline(text, into) {
-  into.textContent = "";
   let last = 0, m;
   INLINE.lastIndex = 0;
   while ((m = INLINE.exec(text)) !== null) {
@@ -277,6 +276,47 @@ function renderInline(text, into) {
     last = m.index + m[0].length;
   }
   if (last < text.length) into.append(text.slice(last));
+}
+
+/* Block-level markdown. Lists and headings were shown as literal "- " and "#". */
+function renderMarkdown(text, into) {
+  into.textContent = "";
+  const lines = String(text).split("\n");
+  let list = null, listTag = null;
+  const closeList = () => { list = null; listTag = null; };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ordered = line.match(/^\s*(\d{1,2})[.)]\s+(.*)$/);
+    const heading = line.match(/^\s*#{1,6}\s+(.*)$/);
+
+    if (bullet || ordered) {
+      const tag = bullet ? "ul" : "ol";
+      if (listTag !== tag) {
+        closeList();
+        list = el(tag, "md-list");
+        listTag = tag;
+        into.append(list);
+      }
+      const li = document.createElement("li");
+      renderInline(bullet ? bullet[1] : ordered[2], li);
+      list.append(li);
+      continue;
+    }
+    closeList();
+    if (!line.trim()) continue;
+    if (heading) {
+      const h = el("div", "md-head");
+      renderInline(heading[1], h);
+      into.append(h);
+      continue;
+    }
+    const para = el("div", "md-p");
+    renderInline(line, para);
+    into.append(para);
+  }
+  if (!into.childNodes.length) renderInline(String(text), into);
 }
 
 /* The search result is collapsed by default: a one-line note you can open to see
@@ -355,29 +395,23 @@ function bubble(role, content, attachments) {
     head.append(document.createTextNode(role));
   }
   const body = el("div", "msg-body");
-  if (content) renderInline(content, body);
+  if (content) renderMarkdown(content, body);
   if (role === "assistant" && (content || "").trim()) {
     addSpeakButton(head, () => body.textContent);
   }
   if (role !== "user") m.append(head);
   m.append(body);
+  // One container: the text, then its attachments beneath a divider, stacked.
+  for (const a of attachments || []) m.append(attachmentBlock(a));
   m.head = head;
   m.body = body;
-  if (!(attachments || []).length) return m;
-
-  // Attachments belong under the message, stacked, not wedged inside it.
-  const group = el("div", "msg-group " + role);
-  group.append(m);
-  for (const a of attachments) group.append(attachmentBlock(a));
-  group.head = head;
-  group.body = body;
-  return group;
+  return m;
 }
 
 /* ------------------------------------------------- sentence-wise speech -- */
 /* Synthesise and play one sentence at a time, so the next renders while the
    current plays and nothing waits for the whole reply (SPEC.md 16). */
-const SENTENCE_END = /^([\s\S]*?[.!?…]+["')\]]*)(\s+)/;
+const SENTENCE_END = /^([\s\S]*?(?:[.!?…]+["')\]]*|\n))(\s*)/;
 const MIN_SENTENCE = 12;
 
 function takeSentences(buffer) {
@@ -498,7 +532,7 @@ async function sendMessage() {
       if (first) { live.body.textContent = ""; first = false; }
       const stick = atBottom();
       shown = (shown + ev.text).replace(/\s+,/g, ",");
-      renderInline(shown, live.body);
+      renderMarkdown(shown, live.body);
       if (pipeline) {
         pending += ev.text;
         const [sentences, rest] = takeSentences(pending);

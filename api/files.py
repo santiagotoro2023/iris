@@ -56,7 +56,22 @@ def _extract_docx(data: bytes) -> str:
     return "\n".join(parts)
 
 
+def _as_png(data: bytes) -> bytes:
+    """The vision model rejects webp and friends outright, so normalise first."""
+    from PIL import Image
+    img = Image.open(io.BytesIO(data))
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
 async def _describe_image(data: bytes, prompt: str) -> str:
+    try:
+        data = _as_png(data)
+    except Exception:
+        pass  # already a format the model accepts, or genuinely unreadable
     body = {"model": settings.get("vision.model"),
             "messages": [{"role": "user",
                           "content": prompt,
@@ -85,7 +100,7 @@ async def analyze(file: UploadFile = File(...),
     suffix = "." + lower.rsplit(".", 1)[-1] if "." in lower else ""
 
     try:
-        if ctype in IMAGE_TYPES or suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        if ctype in IMAGE_TYPES or suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}:
             kind = "image"
             # A specific question beats a generic description.
             text = await _describe_image(
