@@ -94,6 +94,21 @@ def strip_dashes(text: str) -> str:
                           text[m.start() - 1:m.start()].isdigit()) else ", ", text)
 
 
+# Emojis are banned outright (SPEC.md 22). Same reasoning as the dashes: the persona
+# forbids them, and this is what actually guarantees it. Pictographs and dingbats only,
+# so ordinary punctuation and accented letters are untouched.
+_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF"      # pictographs, faces, flags, symbols
+    "☀-➿"               # misc symbols and dingbats
+    "⬀-⯿"               # stars, arrows-as-symbols
+    "️‍⃣]+")       # variation selector, ZWJ, keycap
+
+
+def strip_emoji(text: str) -> str:
+    """Bullets, arrows and accented letters are below this range and stay put."""
+    return re.sub(r"[ \t]{2,}", " ", _EMOJI.sub("", text))
+
+
 # Ollama only understands these keys; anything else we store for our own use must be
 # stripped before the request, and attachment text folded into the content.
 _MODEL_KEYS = {"role", "content", "images", "tool_calls", "tool_name", "thinking"}
@@ -191,7 +206,7 @@ async def stream(messages: list[dict], model: str | None = None,
                         continue
                     msg = chunk.get("message") or {}
                     if msg.get("content"):
-                        piece = strip_dashes(msg["content"])
+                        piece = strip_emoji(strip_dashes(msg["content"]))
                         parts.append(piece)
                         yield {"type": "delta", "text": piece}
                     if msg.get("tool_calls"):

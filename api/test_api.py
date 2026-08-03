@@ -136,6 +136,16 @@ def test_em_dashes_never_reach_the_client():
     assert reasoning.strip_dashes("one \u2013 two") == "one, two"
 
 
+def test_emoji_is_stripped_but_text_is_not():
+    """Emojis are banned outright (SPEC.md 22)."""
+    assert reasoning.strip_emoji("Operational \U0001F31F and ready \U0001F60A") \
+        == "Operational and ready "
+    assert reasoning.strip_emoji("\u2705 done") == " done"
+    # Everything that merely looks exotic must survive: bullets, arrows, accents.
+    keep = "\u2022 caf\u00e9 \u2192 na\u00efve \u2014 51\u2013200 \u00a9"
+    assert reasoning.strip_emoji(keep) == keep
+
+
 def test_web_search_tool_is_registered():
     """IRiS must search rather than guess (SPEC.md 18)."""
     assert "web_search" in reasoning.TOOLS

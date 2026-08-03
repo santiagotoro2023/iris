@@ -847,3 +847,33 @@ Stated by Santiago, verbatim:
   than printing the backticks.
 - **The logo viewBox is cropped to content** (`9 9 102 102`), so the mark fills the frame
   and the tab icon stops looking tiny.
+
+## 22. Automatic Playback Owns the Button, Emoji Ban
+
+Santiago, verbatim:
+
+> Since the model automatically sais things by default once it starts playing the response
+> automatically the icon should also change to a stop icon from the speaker, right now it
+> only does so when i manually click the sound icon.
+
+> Also NO emojis, AT ALL they are BANNED this is an assistant not some visual guide to
+> making you feel better
+
+Resolved:
+
+- **Root cause of the icon bug:** there were two playback paths. `speakText()` owned the
+  button state (`currentBtn`, `setPlayIcon`); the streaming `speechPipeline()` shared only
+  `currentAudio` and never claimed a button. Worse, the reply's speaker button was not
+  created until the `done` event, so during automatic playback there was no button to
+  change. `speechPipeline(btn)` now claims and releases the button exactly as a manual play
+  does, the button is created on the first delta, and `stopSpeech()` stops an active
+  pipeline, so clicking the stop icon during automatic playback actually stops it. An empty
+  queue mid-reply does not release the icon (that is just the generator outpacing the
+  voice); `finish()` marks the end of the reply.
+- **Emojis are banned in both places, same pattern as em-dashes:** the persona forbids them
+  outright, and `reasoning.strip_emoji()` is the safety net applied to every streamed delta.
+  The filter covers pictographs, dingbats and the variation-selector/ZWJ sequences, and
+  deliberately does not touch bullets, arrows, accented letters or the copyright sign.
+- The observed failure ("I'm operational and ready to assist! ... While I don't experience
+  emotions like humans do ... How can I make your day better?") is now a verbatim BAD
+  example in the persona, since worked examples move this model where rules do not.

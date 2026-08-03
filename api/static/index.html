@@ -226,7 +226,7 @@ const SPEAKER_ICON =
 
 /* One player for the whole page. Clicking a second speaker, or the same one again,
    stops what is playing instead of layering another voice on top. */
-let currentAudio = null, currentBtn = null, playToken = 0;
+let currentAudio = null, currentBtn = null, currentPipeline = null, playToken = 0;
 
 const STOP_ICON =
   '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">' +
@@ -242,6 +242,9 @@ function setPlayIcon(btn, playing) {
 
 function stopSpeech() {
   playToken++;
+  const p = currentPipeline;                  // automatic playback is a player too
+  currentPipeline = null;
+  p?.stop();
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   setPlayIcon(currentBtn, false);
   currentBtn = null;
@@ -495,9 +498,25 @@ function playUrl(url) {
   });
 }
 
-function speechPipeline() {
+function speechPipeline(btn) {
   const queue = [];
-  let draining = false, stopped = false;
+  let draining = false, stopped = false, ended = false;
+
+  // Automatic playback holds the reply's speaker button exactly as a manual play
+  // does, so the icon is a stop button whenever anything is actually speaking.
+  function claim() {
+    if (currentPipeline === self) return;
+    stopSpeech();
+    currentPipeline = self;
+    currentBtn = btn;
+    setPlayIcon(btn, true);
+  }
+  function release() {
+    if (currentPipeline !== self) return;
+    currentPipeline = null;
+    setPlayIcon(currentBtn, false);
+    currentBtn = null;
+  }
 
   async function drain() {
     if (draining) return;
@@ -509,20 +528,29 @@ function speechPipeline() {
       } catch { /* one bad sentence must not kill the rest */ }
     }
     draining = false;
+    // An empty queue mid-reply is just the generator being slower than the voice.
+    if (ended || stopped) release();
   }
 
-  return {
+  const self = {
     push(sentence) {
       if (stopped || !sentence.trim()) return;
+      claim();
       queue.push(synthesise(sentence));   // starts now; playback stays in order
       drain();
+    },
+    finish() {                            // no more sentences are coming
+      ended = true;
+      if (!draining) release();
     },
     stop() {
       stopped = true;
       queue.length = 0;
       if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+      release();
     },
   };
+  return self;
 }
 
 function paintChat(messages) {
@@ -571,14 +599,19 @@ async function sendMessage() {
   log.append(live);
   log.scrollTop = log.scrollHeight;
 
-  const pipeline = VALUES["voice.speak_replies"] ? speechPipeline() : null;
+  let pipeline = null;                 // built with the button, at the first delta
   let shown = "", pending = "", first = true;
 
   const onEvent = ev => {
     if (ev.type === "start") {
       CONV = ev.conversation_id;
     } else if (ev.type === "delta") {
-      if (first) { live.body.textContent = ""; first = false; }
+      if (first) {
+        live.body.textContent = "";
+        first = false;
+        const btn = addSpeakButton(live.head, () => live.body.textContent);
+        if (VALUES["voice.speak_replies"]) pipeline = speechPipeline(btn);
+      }
       const stick = atBottom();
       shown = (shown + ev.text).replace(/\s+,/g, ",");
       renderMarkdown(shown, live.body);
@@ -615,7 +648,7 @@ async function sendMessage() {
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "done") {
       if (pipeline && pending.trim()) { pipeline.push(pending.trim()); pending = ""; }
-      if (shown.trim()) addSpeakButton(live.head, () => live.body.textContent);
+      pipeline?.finish();
     } else if (ev.type === "error") {
       throw new Error(ev.detail);
     }
