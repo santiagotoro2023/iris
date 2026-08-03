@@ -224,11 +224,35 @@ const SPEAKER_ICON =
   'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 0 1 0 6"/></svg>';
 
-let currentAudio = null;
+/* One player for the whole page. Clicking a second speaker, or the same one again,
+   stops what is playing instead of layering another voice on top. */
+let currentAudio = null, currentBtn = null, playToken = 0;
+
+const STOP_ICON =
+  '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">' +
+  '<rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>';
+
+function setPlayIcon(btn, playing) {
+  if (!btn) return;
+  btn.innerHTML = playing ? STOP_ICON : SPEAKER_ICON;
+  btn.classList.toggle("busy", playing);
+  btn.title = playing ? "Stop" : "Play this reply";
+  btn.setAttribute("aria-label", playing ? "Stop playback" : "Play this reply as speech");
+}
+
+function stopSpeech() {
+  playToken++;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  setPlayIcon(currentBtn, false);
+  currentBtn = null;
+}
 
 async function speakText(text, btn) {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  btn?.classList.add("busy");
+  if (btn && btn === currentBtn) { stopSpeech(); return; }   // second click stops
+  stopSpeech();
+  const token = ++playToken;
+  currentBtn = btn;
+  setPlayIcon(btn, true);
   try {
     const r = await api("voice/speak", {
       method: "POST", headers: {"content-type": "application/json"},
@@ -238,14 +262,20 @@ async function speakText(text, btn) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.detail || `error ${r.status}`);
     }
+    if (token !== playToken) return;            // superseded while synthesising
     const url = URL.createObjectURL(await r.blob());
-    currentAudio = new Audio(url);
-    const done = () => { btn?.classList.remove("busy"); URL.revokeObjectURL(url); };
-    currentAudio.onended = done;
-    currentAudio.onerror = done;
-    await currentAudio.play();
+    const audio = new Audio(url);
+    currentAudio = audio;
+    const done = () => {
+      URL.revokeObjectURL(url);
+      if (token === playToken) { currentAudio = null; setPlayIcon(btn, false);
+                                 currentBtn = null; }
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    await audio.play();
   } catch (e) {
-    btn?.classList.remove("busy");
+    if (token === playToken) { setPlayIcon(btn, false); currentBtn = null; }
     if (btn) btn.title = "Speech failed: " + e.message;
   }
 }
@@ -282,10 +312,25 @@ function renderInline(text, into) {
 function renderMarkdown(text, into) {
   into.textContent = "";
   const lines = String(text).split("\n");
-  let list = null, listTag = null;
+  let list = null, listTag = null, fence = null, fenceLang = "";
   const closeList = () => { list = null; listTag = null; };
 
   for (const raw of lines) {
+    const fenceMark = raw.match(/^\s*```(\w*)\s*$/);
+    if (fenceMark) {
+      if (fence) { fence = null; }             // closing
+      else {
+        closeList();
+        fenceLang = fenceMark[1] || "";
+        const pre = el("pre", "md-code");
+        if (fenceLang) pre.dataset.lang = fenceLang;
+        fence = el("code");
+        pre.append(fence);
+        into.append(pre);
+      }
+      continue;
+    }
+    if (fence) { fence.append(raw + "\n"); continue; }
     const line = raw.replace(/\s+$/, "");
     const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
     const ordered = line.match(/^\s*(\d{1,2})[.)]\s+(.*)$/);
@@ -300,6 +345,8 @@ function renderMarkdown(text, into) {
         into.append(list);
       }
       const li = document.createElement("li");
+      // Carry the real number, so a list broken by a paragraph does not restart at 1.
+      if (ordered) li.value = Number(ordered[1]);
       renderInline(bullet ? bullet[1] : ordered[2], li);
       list.append(li);
       continue;
@@ -438,11 +485,13 @@ async function synthesise(text) {
 
 function playUrl(url) {
   return new Promise(resolve => {
-    currentAudio = new Audio(url);
-    const done = () => { URL.revokeObjectURL(url); resolve(); };
-    currentAudio.onended = done;
-    currentAudio.onerror = done;
-    currentAudio.play().catch(done);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    const done = () => { URL.revokeObjectURL(url); if (currentAudio === audio)
+                           currentAudio = null; resolve(); };
+    audio.onended = done;
+    audio.onerror = done;
+    audio.play().catch(done);
   });
 }
 

@@ -71,13 +71,17 @@ def _piper_voice(name: str):
     return _piper[name]
 
 
-def _piper_speak(text: str, voice: str, speed: float) -> bytes:
+def _piper_speak(text: str, voice: str, speed: float, expressiveness: float) -> bytes:
     from piper import SynthesisConfig
     v = _piper_voice(voice)
     buf = io.BytesIO()
+    # Piper's defaults (0.667 / 0.8) read as excitable. Scaling them down flattens the
+    # delivery, which is what IRiS should sound like.
+    cfg = SynthesisConfig(length_scale=1.0 / speed,          # inverse of "speed"
+                          noise_scale=0.20 + 0.60 * expressiveness,
+                          noise_w_scale=0.25 + 0.75 * expressiveness)
     with wave.open(buf, "wb") as w:
-        # Piper's length_scale stretches time, so it is the inverse of "speed".
-        v.synthesize_wav(text, w, syn_config=SynthesisConfig(length_scale=1.0 / speed))
+        v.synthesize_wav(text, w, syn_config=cfg)
     return buf.getvalue()
 
 
@@ -186,6 +190,7 @@ def speak(text: str = Form(...),
           speaker: str = Form(DEFAULT_SPEAKER),
           language: str = Form("en"),
           speed: float = Form(1.0),
+          expressiveness: float = Form(0.25),
           device: str = Form(DEFAULT_DEVICE),
           idle_unload: float = Form(-1.0)):
     global _idle_unload
@@ -198,7 +203,7 @@ def speak(text: str = Form(...),
 
     try:
         if engine == "piper":
-            audio = _piper_speak(text, speaker, speed)
+            audio = _piper_speak(text, speaker, speed, expressiveness)
         else:
             audio = _xtts_speak(text, speaker, language, speed, device)
     except HTTPException:

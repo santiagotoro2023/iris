@@ -91,7 +91,7 @@ settings.setting(
 
 
 settings.setting(
-    "voice.speak_replies", type="boolean", default=False,
+    "voice.speak_replies", type="boolean", default=True,
     title="Speak replies aloud",
     description="Play IRiS's answers as speech automatically. You can always play an "
                 "individual reply with the speaker button.")
@@ -118,6 +118,11 @@ settings.setting(
     "voice.tts_speed", type="number", minimum=0.5, maximum=1.6, default=1.1,
     title="Speaking pace",
     description="1.0 is natural. Lower is more deliberate, higher is brisker.")
+settings.setting(
+    "voice.expressiveness", type="number", minimum=0.0, maximum=1.0, default=0.25,
+    title="Expressiveness",
+    description="How much the voice varies in pitch and pacing. Low is level and "
+                "matter-of-fact; high gets excitable.")
 settings.setting(
     "voice.tts_device", type="string", enum=["cuda", "cpu"],
     default=os.environ.get("TTS_DEVICE", "cuda"),
@@ -224,6 +229,7 @@ async def speak(body: SpeakRequest, user: dict = Depends(auth.active_user)):
         "speaker": settings.get("voice.tts_speaker"),
         "language": body.language or settings.get("voice.tts_language"),
         "speed": str(settings.get("voice.tts_speed")),
+        "expressiveness": str(settings.get("voice.expressiveness")),
         "device": settings.get("voice.tts_device"),
         "idle_unload": str(settings.get("voice.tts_idle_unload")),
     }

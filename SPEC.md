@@ -824,3 +824,26 @@ Stated by Santiago, verbatim:
   it did with the SIDMAR logo. German words spoken by an English Piper voice will stay
   wrong; the phonemiser is English-only, so fixing it properly means routing German text to
   a German voice.
+
+---
+
+## 21. Playback Control, Brevity, Code Rendering
+
+- **One audio player for the page.** Clicking a speaker while it plays stops it; clicking
+  a different reply's speaker replaces the current one instead of layering a second voice.
+  The button swaps to a stop icon while playing. A `playToken` guards the async gap, so a
+  reply superseded during synthesis never starts.
+- **`voice.speak_replies` now defaults on.**
+- **`voice.expressiveness`** (default 0.25) scales Piper's `noise_scale` / `noise_w_scale`,
+  whose defaults (0.667 / 0.8) read as excitable. Low is level and matter-of-fact.
+- **Brevity.** The persona now bans "Key Details" headers, restating the question,
+  summarising itself and listing next steps. The SIDMAR answer went from ~1600 to 607
+  characters.
+- **An explicit instruction to search is an order**, not a suggestion, and the persona says
+  so. Verified: "Search the web for the current Debian stable version" searched.
+- **Ordered lists carry their real number** via `li.value`; a paragraph between items used
+  to restart the list at 1 while the spoken version said the right numbers.
+- **Fenced code blocks render** as a bordered monospace panel with the language tag, rather
+  than printing the backticks.
+- **The logo viewBox is cropped to content** (`9 9 102 102`), so the mark fills the frame
+  and the tab icon stops looking tiny.
