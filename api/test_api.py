@@ -361,6 +361,75 @@ def test_grounding_ignores_filler_words():
     assert not memory._grounded("The user enjoys skiing in the Alps.", SAID)
 
 
+class FakeRedis:
+    """Just the five operations compaction uses."""
+    def __init__(self):
+        self.kv, self.hashes = {}, {}
+
+    async def set(self, k, v):
+        self.kv[k] = v
+
+    async def get(self, k):
+        return self.kv.get(k)
+
+    async def delete(self, k):
+        self.kv.pop(k, None)
+
+    async def hset(self, k, f, v):
+        self.hashes.setdefault(k, {})[f] = v
+
+    async def hgetall(self, k):
+        return dict(self.hashes.get(k, {}))
+
+    async def hdel(self, k, f):
+        self.hashes.get(k, {}).pop(f, None)
+
+    async def scan_iter(self, pattern):
+        import fnmatch
+        for k in list(self.hashes):
+            if fnmatch.fnmatch(k, pattern):
+                yield k
+
+
+def test_compaction_expires_old_transcripts_and_nothing_else():
+    """This deletes real user data, so every boundary is pinned: the window itself,
+    the disable switch, and the transcript body as well as the index entry."""
+    import asyncio
+    import time
+
+    import chat
+
+    async def scenario(days):
+        r = FakeRedis()
+        now = time.time()
+        ages = {"fresh": now - 86400, "edge-29d": now - 29 * 86400,
+                "edge-31d": now - 31 * 86400, "ancient": now - 400 * 86400,
+                "no-timestamp": None}
+        for cid, ts in ages.items():
+            await r.set(chat._msgs_key(7, cid), json.dumps([{"role": "user"}]))
+            meta = {"id": cid}
+            if ts:
+                meta["updated"] = ts
+            await r.hset(chat._index_key(7), cid, json.dumps(meta))
+        with patch.object(chat, "_redis", r):
+            result = await chat.compact(days)
+        return r, result
+
+    r, result = asyncio.run(scenario(30))
+    left = set(asyncio.run(r.hgetall(chat._index_key(7))))
+    assert left == {"fresh", "edge-29d"}, left
+    assert result == {"removed": 3, "kept": 2}, result
+    # The transcript must go too, or the index shrinks while Redis keeps growing.
+    for cid in ("edge-31d", "ancient", "no-timestamp"):
+        assert asyncio.run(r.get(chat._msgs_key(7, cid))) is None, cid
+    for cid in ("fresh", "edge-29d"):
+        assert asyncio.run(r.get(chat._msgs_key(7, cid))) is not None, cid
+
+    r, result = asyncio.run(scenario(0))
+    assert result["removed"] == 0
+    assert len(asyncio.run(r.hgetall(chat._index_key(7)))) == 5
+
+
 def test_backup_delete_cannot_escape_the_backup_directory():
     """The filename comes from the client, so a crafted one must not walk out."""
     import asyncio

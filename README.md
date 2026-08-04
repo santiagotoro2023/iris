@@ -167,9 +167,14 @@ are close, so it is worth tuning by eye once there are real memories in there. T
 shorter than three words skip recall entirely, because a two-word fragment scores
 ~0.44 against almost anything and would drag in the whole store.
 
-> Not yet built: raw conversation ingestion, diarization, the nightly compaction that
-> enforces the 30-day raw retention, and the encrypted off-machine backup. The backup
-> destination is an open question in [SPEC.md](./SPEC.md).
+**Retention.** Transcripts older than *Keep transcripts for* (30 days by default) are
+deleted nightly, an hour after the backup so nothing expires before it is archived.
+Only the verbatim record expires: whatever IRiS learned from a conversation was
+distilled into a memory when the exchange happened and is kept. Set it to 0 to keep
+everything forever.
+
+> Not yet built: audio ingestion and speaker diarization. Everything else in Phase 3
+> is done.
 
 ## Backups
 

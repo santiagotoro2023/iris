@@ -10,11 +10,15 @@ them, and the second is what actually makes memory work:
 
 Qdrant speaks plain HTTP and httpx is already here, so there is no client library.
 """
+import asyncio
 import json
 import os
 import re
 import time
 import uuid
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,6 +76,12 @@ settings.setting(
                 "Measured with bge-m3 on full-sentence questions: genuine matches "
                 "score down to 0.43 and unrelated ones up to 0.37. The bands are "
                 "close, so this is worth tuning by eye once there are real memories.")
+settings.setting(
+    "memory.retention_days", type="integer", minimum=0, maximum=3650, default=30,
+    title="Keep transcripts for (days)",
+    description="Conversations older than this are deleted nightly. What IRiS learned "
+                "from them was already distilled into memories and is kept, so this "
+                "expires the verbatim record, not the knowledge. 0 keeps everything.")
 settings.setting(
     "memory.auto_capture", type="boolean", default=True,
     title="Learn from conversations",
@@ -381,3 +391,25 @@ async def capture(exchange: list[dict], user_id: int) -> list[str]:
     except Exception as e:
         print(f"[memory] capture failed: {e}", flush=True)
         return []
+
+
+async def compactor() -> None:
+    """Nightly retention sweep (SPEC.md 6). Runs an hour after the backup, so a
+    transcript is always archived before it is expired."""
+    import chat
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            now = datetime.now(ZoneInfo(settings.get("general.timezone")))
+            if now.hour != (int(settings.get("backup.at").split(":")[0]) + 1) % 24:
+                continue
+            result = await chat.compact(settings.get("memory.retention_days"))
+            if result["removed"]:
+                print(f"[memory] compacted {result['removed']} transcripts", flush=True)
+                await activity.record(
+                    "memory.compact",
+                    f"{result['removed']} transcripts past "
+                    f"{settings.get('memory.retention_days')} days, "
+                    f"{result['kept']} kept", "schedule")
+        except Exception as e:
+            print(f"[memory] compaction failed: {e}", flush=True)

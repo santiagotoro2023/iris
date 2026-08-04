@@ -1184,7 +1184,25 @@ Measured after the change, one precise fact per real exchange and nothing else:
 | "What is the capital of Australia?" | nothing |
 | "haha ok thanks that helps a lot" | nothing |
 
+## 28. Retention
+
+§6 asks for "nightly compaction enforcing the 30-day rolling raw retention". That
+became buildable once conversations were distilled into memories (§27), because the
+distinction it depends on now exists: **the transcript is raw, the memory is not.**
+What expires nightly is the verbatim record; what IRiS learned from it survives.
+
+Runs an hour after the backup, so a transcript is always archived before it is
+expired. `memory.retention_days` defaults to 30 and 0 keeps everything forever.
+
+**A conversation with no timestamp is treated as old, not immortal.** Entries predate
+the `updated` field, and the alternative reading would make them permanently
+un-compactable.
+
+Verified on fixtures, since this deletes real user data: at 30 days a 29-day-old
+conversation is kept and a 31-day-old one is not, `0` removes nothing at all, the
+transcript body is deleted alongside its index entry rather than orphaned in Redis,
+and other users are untouched. All of that is pinned by a test with a fake Redis.
+
 ### Still open in Phase 3
 
-Audio ingestion and diarization (pyannote), and the nightly compaction enforcing the
-30-day rolling raw retention.
+Audio ingestion and speaker diarization (pyannote). Everything else is done.

@@ -71,6 +71,35 @@ async def _save(uid: int, cid: str, messages: list[dict], title: str | None = No
     await _redis.hset(_index_key(uid), cid, json.dumps(meta))
 
 
+async def compact(days: int) -> dict:
+    """Drop raw transcripts past the retention window (SPEC.md 6, 30-day rolling).
+
+    Only the transcript is raw. Anything durable in it was already distilled into a
+    memory when the exchange happened, so what expires here is the verbatim record,
+    not what IRiS learned. 0 keeps everything forever.
+    """
+    if days <= 0:
+        return {"removed": 0, "kept": 0}
+    cutoff = time.time() - days * 86400
+    removed = kept = 0
+    async for index in _redis.scan_iter("chat:*:index"):
+        uid = index.split(":")[1]
+        for cid, raw in (await _redis.hgetall(index)).items():
+            try:
+                updated = json.loads(raw).get("updated", 0)
+            except ValueError:
+                updated = 0
+            # A conversation with no timestamp predates that field; treat it as old
+            # rather than immortal, or it can never be compacted.
+            if updated and updated >= cutoff:
+                kept += 1
+                continue
+            await _redis.delete(_msgs_key(int(uid), cid))
+            await _redis.hdel(index, cid)
+            removed += 1
+    return {"removed": removed, "kept": kept}
+
+
 @router.get("/conversations")
 async def conversations(user: dict = Depends(auth.active_user)):
     raw = await _redis.hgetall(_index_key(user["id"]))

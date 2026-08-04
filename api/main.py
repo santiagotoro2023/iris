@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
     await activity.init()
     await chat.init()
     asyncio.create_task(backup.scheduler())
+    asyncio.create_task(memory.compactor())
     yield
 
 
