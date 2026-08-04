@@ -100,6 +100,12 @@ QUICK_COMMANDS: dict[str, dict] = {
         "directive": "Use check_mail. Summarise who wrote and what about, one line "
                      "each. Do not invent messages that are not listed.",
     },
+    "calendar": {
+        "label": "What's on",
+        "hint": "optional: what you want to know",
+        "directive": "Use the calendar tool. List what is on with times, nothing "
+                     "more. Do not invent appointments.",
+    },
     "search": {
         "label": "Search the web",
         "hint": "what to look up",
@@ -218,6 +224,17 @@ async def _recall(query: str):
 async def _check_mail():
     import integrations
     return await integrations.check_all_mail()
+
+
+@tool("calendar",
+      "What is on the user's calendar. Use this for any question about appointments, "
+      "meetings, what they have on, or whether they are free.",
+      {"type": "object",
+       "properties": {}},
+      activity="Checking the calendar", display="lines")
+async def _calendar():
+    import integrations
+    return await integrations.check_all_calendars()
 
 
 @tool("transit",

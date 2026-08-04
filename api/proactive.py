@@ -51,6 +51,11 @@ settings.setting(
     title="Include mail in the briefing",
     description="Only has an effect once a mailbox is set up under Integrations.")
 settings.setting(
+    "proactive.calendar", type="boolean", default=True,
+    title="Include the calendar",
+    description="Today's appointments. Only has an effect once a calendar is set up "
+                "under Integrations.")
+settings.setting(
     "proactive.weather", type="boolean", default=True,
     title="Include the weather",
     description="Today's forecast for Home. Needs Home set under Settings.")
@@ -97,6 +102,13 @@ async def gather() -> list[str]:
                 parts.append(await places.journey(home, work))
             except Exception as e:
                 print(f"[proactive] commute lookup failed: {e}", flush=True)
+
+    if settings.get("proactive.calendar"):
+        if await registry.enabled_of_type("integration", "calendar"):
+            try:
+                parts.append(await integrations.check_all_calendars())
+            except Exception as e:
+                print(f"[proactive] calendar check failed: {e}", flush=True)
 
     if settings.get("proactive.include_mail"):
         if await registry.enabled_of_type("integration", "mailbox"):

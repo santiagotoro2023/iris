@@ -256,14 +256,17 @@ supports.
 | | types today | actions |
 |---|---|---|
 | Devices | Camera, Microphone | *look*, *snapshot*, *listen* |
-| Integrations | Mailbox (IMAP), Webhook | *check mail*, *send a test* |
+| Integrations | Mailbox (IMAP), Calendar (CalDAV), Push to phone (ntfy), Webhook | *check mail*, *what's on*, *send a test* |
 
 A **camera** takes an `rtsp://…` URL or the `http://…/snapshot.jpg` endpoint many
 cameras expose; *look* pulls a frame and describes it, and IRiS gets a
 `look_at_camera` tool so "is anyone at the front door?" works in chat. A
 **microphone** records a span of a network audio stream, transcribes it, and files it
 in memory. A **mailbox** is any IMAP server — Outlook, Gmail with an app password, or
-your own — and gives IRiS a `check_mail` tool.
+your own — and gives IRiS a `check_mail` tool. A **calendar** is CalDAV, which
+Outlook, Google and Nextcloud all speak with a username and app password, no OAuth
+registration. **Push** is ntfy: notifications on your phone with no account and no
+app store, and it carries the daily briefing too.
 
 Credentials never come back out. A secret field is stored on this machine and
 returned to the browser as dots; sending the dots back means "unchanged", so editing a

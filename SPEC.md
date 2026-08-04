@@ -1473,3 +1473,34 @@ fields never confuse the model.
 quick-command entry. No endpoint, no client change, and it appeared in the chat
 announcing "Checking the weather", in the quick-command menu, and in the daily
 briefing.
+
+
+## 36. Calendar and Push
+
+Santiago picked CalDAV and asked for suggestions that fit. Built: **Calendar
+(CalDAV)** and **Push to phone (ntfy)**, both credential-light and both real.
+
+**CalDAV without a library.** It is one `REPORT` request with a time-range filter and
+a little XML. Every CalDAV client library pulls in a dependency tree larger than the
+feature, and this is httpx plus a regex. Works against Outlook, Google and Nextcloud
+with a username and an app password, which is the whole reason it beat Graph and the
+Gmail API: no OAuth app registration, so nothing is blocked on Santiago.
+
+Two iCalendar details that are easy to get wrong and are pinned by tests:
+
+- **Lines are folded at 75 characters**, continued with a leading space. Parsing
+  before unfolding truncates exactly the long summaries worth reading.
+- **An all-day event carries a DATE, not a DATETIME.** Rendering it naively puts every
+  birthday at midnight, so it reads "all day" instead.
+
+**ntfy** puts IRiS on a phone with no account, no app store dependency and no push
+certificate: install the app, subscribe to an unguessable topic, done. The topic is
+stored as a secret field because on a public server it *is* the credential. It also
+joins `notify()`, so the daily briefing now reaches the phone as well as the chat.
+
+### Suggested next, still unbuilt
+
+- **Home Assistant** — one long-lived token, and it makes "turn the heating down" real.
+- **MQTT** — mosquitto has been running since Phase 0 and is still unused; this is the
+  cheapest route to anything else in the house.
+- **RSS** — a feed or two, folded into the briefing.

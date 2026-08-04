@@ -13,6 +13,7 @@ import auth
 import main
 import persona
 import places
+import integrations
 import proactive
 import reasoning
 import registry
@@ -458,6 +459,39 @@ def test_journey_duration_is_readable_aloud():
     assert places._minutes(None) == "?"
     assert places._minutes("nonsense") == "?"
     assert places._minutes("00dxx:yy:00") == "00dxx:yy:00"   # shaped but unparseable
+
+
+def test_ical_lines_are_unfolded_before_parsing():
+    """iCalendar folds any line past 75 characters onto the next one, starting with
+    a space. Parsing before unfolding truncates every long summary, which is exactly
+    the appointments worth reading."""
+    ics = ("BEGIN:VEVENT\r\n"
+           "SUMMARY:Quarterly review with the SAP team about the migration\r\n"
+           " schedule and the cutover window\r\n"
+           "DTSTART:20260805T090000Z\r\n"
+           "LOCATION:Room 4\r\n"
+           "END:VEVENT")
+    events = integrations._parse_events(ics)
+    assert len(events) == 1, events
+    assert events[0]["summary"].endswith("cutover window"), events[0]["summary"]
+    assert events[0]["location"] == "Room 4"
+
+
+def test_all_day_events_do_not_claim_a_time():
+    """An all-day event has a DATE, not a DATETIME. Rendering it as 00:00 would put
+    every birthday at midnight."""
+    ics = ("BEGIN:VEVENT\nSUMMARY:Public holiday\n"
+           "DTSTART;VALUE=DATE:20260805\nEND:VEVENT")
+    event = integrations._parse_events(ics)[0]
+    assert event["all_day"] is True
+    assert integrations._when(event) == "all day"
+
+
+def test_a_timed_event_reads_as_a_clock_time():
+    ics = "BEGIN:VEVENT\nSUMMARY:Standup\nDTSTART:20260805T090000Z\nEND:VEVENT"
+    event = integrations._parse_events(ics)[0]
+    assert not event.get("all_day")
+    assert re.match(r"^\d\d:\d\d$", integrations._when(event)), integrations._when(event)
 
 
 def test_quiet_hours_wrap_midnight():

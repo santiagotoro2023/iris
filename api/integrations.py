@@ -9,6 +9,10 @@ every provider Santiago is likely to use speaks it. Microsoft Graph and Gmail's 
 APIs (SPEC.md 5) buy push notification and richer search, and cost an OAuth app
 registration each; IMAP works today with an app password.
 
+**Calendar** is CalDAV, which is one REPORT request and a little XML; every client
+library for it drags in more dependency than the feature is worth. **Push** is ntfy,
+which puts IRiS on a phone with no account and no app store.
+
 **Webhook** is the outbound half of Phase 6's integration layer: somewhere to POST
 when something happens, which Phase 7's proactive engine will want.
 """
@@ -17,7 +21,9 @@ import email
 import email.header
 import email.utils
 import imaplib
-import json
+import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException
@@ -136,6 +142,149 @@ registry.register(registry.Type(
 ))
 
 
+# --------------------------------------------------------------- calendar ----
+
+# CalDAV is WebDAV with a calendar-flavoured REPORT. No library: this is one request
+# and a small amount of XML, and every CalDAV client library drags in a dependency
+# tree larger than the feature.
+_CALDAV_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><C:calendar-data/></D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT">
+        <C:time-range start="{start}" end="{end}"/>
+      </C:comp-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>"""
+
+_ICS_UNFOLD = re.compile(r"\r?\n[ \t]")
+
+
+def _parse_events(ics: str) -> list[dict]:
+    """Pull SUMMARY and DTSTART out of the VEVENTs in a calendar-data blob.
+
+    iCalendar folds long lines by starting the continuation with a space, so
+    unfolding has to happen before anything is parsed or every long summary is
+    truncated at 75 characters.
+    """
+    events = []
+    for block in _ICS_UNFOLD.sub("", ics).split("BEGIN:VEVENT")[1:]:
+        block = block.split("END:VEVENT")[0]
+        event = {}
+        for line in block.splitlines():
+            name, _, value = line.partition(":")
+            key = name.split(";")[0].upper()
+            if key == "SUMMARY":
+                event["summary"] = value.strip()
+            elif key == "DTSTART":
+                event["start"] = value.strip()
+                event["all_day"] = "VALUE=DATE" in name.upper()
+            elif key == "LOCATION":
+                event["location"] = value.strip()
+        if event.get("summary"):
+            events.append(event)
+    return events
+
+
+def _when(event: dict) -> str:
+    raw = event.get("start", "")
+    if event.get("all_day"):
+        return "all day"
+    try:
+        stamp = datetime.strptime(raw.rstrip("Z")[:15], "%Y%m%dT%H%M%S")
+        if raw.endswith("Z"):
+            stamp = stamp.replace(tzinfo=timezone.utc).astimezone(
+                ZoneInfo(settings.get("general.timezone")))
+        return stamp.strftime("%H:%M")
+    except ValueError:
+        return raw or "?"
+
+
+async def _fetch_events(config: dict, days: int) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    body = _CALDAV_REPORT.format(
+        start=now.strftime("%Y%m%dT%H%M%SZ"),
+        end=(now + timedelta(days=days)).strftime("%Y%m%dT%H%M%SZ"))
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        r = await c.request(
+            "REPORT", config["url"],
+            auth=(config.get("username", ""), config.get("password", "")),
+            headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
+            content=body.encode())
+    if r.status_code == 401:
+        raise HTTPException(502, "the calendar rejected those credentials")
+    if r.status_code >= 300:
+        raise HTTPException(502, f"calendar returned HTTP {r.status_code}")
+    events = []
+    for match in re.finditer(r"BEGIN:VCALENDAR.*?END:VCALENDAR", r.text, re.S):
+        events.extend(_parse_events(match.group(0)))
+    events.sort(key=lambda e: e.get("start", ""))
+    return events
+
+
+async def _check_calendar(thing: dict, user: dict | None = None) -> dict:
+    days = int(thing["config"].get("days") or 1)
+    events = await _fetch_events(thing["config"], days)
+    return {"calendar": thing["name"], "count": len(events),
+            "messages": [{"from": _when(e),
+                          "subject": e["summary"]
+                          + (f" ({e['location']})" if e.get("location") else "")}
+                         for e in events]}
+
+
+registry.register(registry.Type(
+    kind="integration", name="calendar", label="Calendar (CalDAV)",
+    description="Outlook, Google, Nextcloud or your own server, over CalDAV. Needs a "
+                "username and an app password, not an OAuth registration.",
+    fields=[
+        registry.Field("url", "Calendar URL", required=True,
+                       help="The collection URL, ending in a slash. Nextcloud: "
+                            "https://host/remote.php/dav/calendars/you/personal/"),
+        registry.Field("username", "Username", required=True),
+        registry.Field("password", "Password", type="password", required=True,
+                       secret=True, help="An app password, as with the mailbox."),
+        registry.Field("days", "Days ahead", type="number", default=1),
+    ],
+    actions={"check": _check_calendar},
+    action_labels={"check": "what's on"},
+))
+
+
+# ------------------------------------------------------------------ push ----
+
+async def _send_push(thing: dict, user: dict | None = None,
+                     text: str = "IRiS is connected.") -> dict:
+    config = thing["config"]
+    server = (config.get("server") or "https://ntfy.sh").rstrip("/")
+    headers = {"Title": "IRiS", "Priority": str(int(config.get("priority") or 3))}
+    if config.get("token"):
+        headers["Authorization"] = f"Bearer {config['token']}"
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post(f"{server}/{config['topic']}", content=text.encode(),
+                         headers=headers)
+    return {"status": r.status_code, "ok": r.status_code < 300}
+
+
+registry.register(registry.Type(
+    kind="integration", name="push", label="Push to phone (ntfy)",
+    description="Notifications on your phone without an account or an app store: "
+                "install ntfy, subscribe to a topic, and IRiS can reach you.",
+    fields=[
+        registry.Field("topic", "Topic", type="password", required=True, secret=True,
+                       help="Anyone who knows the topic on a public server can read "
+                            "it, so pick something unguessable."),
+        registry.Field("server", "Server", default="https://ntfy.sh",
+                       help="Change if you self-host ntfy."),
+        registry.Field("priority", "Priority", type="number", default=3,
+                       help="1 quiet, 3 default, 5 urgent."),
+    ],
+    actions={"test": _send_push},
+    action_labels={"test": "send a test"},
+))
+
+
 # ------------------------------------------------------------------ tool ----
 
 async def check_all_mail() -> str:
@@ -159,11 +308,30 @@ async def check_all_mail() -> str:
     return "\n".join(lines)
 
 
+async def check_all_calendars() -> str:
+    cals = await registry.enabled_of_type("integration", "calendar")
+    if not cals:
+        return ("No calendar is set up. Add one under Integrations with its CalDAV "
+                "URL and an app password.")
+    lines = []
+    for cal in cals:
+        try:
+            result = await _check_calendar(cal)
+        except HTTPException as e:
+            lines.append(f"{cal['name']}: unreachable ({e.detail})")
+            continue
+        if not result["messages"]:
+            lines.append(f"{cal['name']}: nothing scheduled.")
+            continue
+        lines.append(f"{cal['name']}:")
+        lines.extend(f"- {m['from']} {m['subject']}" for m in result["messages"])
+    return "\n".join(lines)
+
+
 async def notify(text: str, event: str = "notice") -> int:
-    """Fan out to every configured webhook. Phase 7 will want this."""
-    hooks = await registry.enabled_of_type("integration", "webhook")
+    """Fan out to every outbound channel. Phase 7 uses this for the briefing."""
     sent = 0
-    for hook in hooks:
+    for hook in await registry.enabled_of_type("integration", "webhook"):
         try:
             async with httpx.AsyncClient(timeout=15) as c:
                 await c.post(hook["config"]["url"],
@@ -171,4 +339,10 @@ async def notify(text: str, event: str = "notice") -> int:
             sent += 1
         except Exception as e:
             print(f"[integrations] webhook {hook['name']} failed: {e}", flush=True)
+    for push in await registry.enabled_of_type("integration", "push"):
+        try:
+            await _send_push(push, text=text)
+            sent += 1
+        except Exception as e:
+            print(f"[integrations] push {push['name']} failed: {e}", flush=True)
     return sent
