@@ -175,7 +175,9 @@ _TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty"}
 # Colon, dot or "h", because the model writes 16:00, 08.30 and 8h30 interchangeably.
 # A trailing am/pm is swallowed so "8:30 AM" does not become "eight thirty A M A M".
 _CLOCK = re.compile(
-    r"\b([01]?\d|2[0-3])\s*([:.h])\s*([0-5]\d)\b\s*(?:([ap])\.?m\.?)?", re.I)
+    # The space belongs to the optional group: consumed on its own it welded the
+    # meridiem to the next word, giving "eight thirty AMUhr".
+    r"\b([01]?\d|2[0-3])\s*([:.h])\s*([0-5]\d)\b(?:\s*([ap])\.?m\.?\b)?", re.I)
 
 
 def _spoken_number(n: int) -> str:
