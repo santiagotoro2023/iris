@@ -40,6 +40,7 @@
     <button class="tab" role="tab" aria-selected="true"  data-view="chat">Chat</button>
     <button class="tab" role="tab" aria-selected="false" data-view="conversations">Conversations</button>
     <button class="tab" role="tab" aria-selected="false" data-view="memory">Memory</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="cameras">Cameras</button>
     <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
   </nav>
@@ -124,6 +125,24 @@
     </div>
   </section>
 
+  <section class="view" id="view-cameras" role="tabpanel">
+    <div class="panel">
+      <h2>Cameras</h2>
+      <div class="mem-add">
+        <input class="input" id="cam-name" type="text" placeholder="Name, e.g. front door"
+               aria-label="Camera name" style="flex:0 0 12rem">
+        <input class="input" id="cam-url" type="text"
+               placeholder="rtsp://user:password@192.168.1.50:554/stream"
+               aria-label="Stream URL">
+        <button class="btn" id="cam-add" type="button">Add</button>
+      </div>
+      <div class="desc" id="cam-note" style="padding:0 .8rem .6rem">
+        Passwords are stored on this machine and never sent back to the browser.
+      </div>
+      <div id="cam-list"><div class="empty">loading…</div></div>
+    </div>
+  </section>
+
   <section class="view" id="view-settings" role="tabpanel">
     <div id="groups"></div>
   </section>
@@ -150,6 +169,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       v.classList.toggle("active", v.id === "view-" + tab.dataset.view));
     if (tab.dataset.view === "activity") loadActivity();
     if (tab.dataset.view === "memory") { loadMemories(); loadBackups(); }
+    if (tab.dataset.view === "cameras") loadCameras();
   });
 });
 
@@ -1022,6 +1042,76 @@ $("#hands-free").addEventListener("click", async () => {
 });
 // Release the microphone when the page goes away, without turning the setting off.
 window.addEventListener("pagehide", stopHandsFree);
+
+/* ------------------------------------------------------------- cameras -- */
+async function loadCameras() {
+  const list = $("#cam-list");
+  let data;
+  try { data = await json("cameras"); }
+  catch { list.textContent = ""; list.append(el("div", "empty", "Cameras are visible to admins only.")); return; }
+  list.textContent = "";
+  if (!data.cameras.length) {
+    list.append(el("div", "empty", "No cameras yet. Add one above with its RTSP URL."));
+    return;
+  }
+  for (const cam of data.cameras) {
+    const row = el("div", "mem-row");
+    row.append(el("div", "mem-text", cam.name));
+    row.append(el("div", "cam-url", cam.url));
+    const shot = el("div", "cam-shot");
+    row.append(shot);
+    const meta = el("div", "mem-meta");
+
+    const look = el("button", "ghost", "look");
+    look.type = "button";
+    look.addEventListener("click", async () => {
+      look.disabled = true;
+      look.textContent = "looking…";
+      shot.textContent = "";
+      try {
+        const img = document.createElement("img");
+        img.alt = `Current view from ${cam.name}`;
+        // Cache-busted, or the browser shows the frame from the last time you looked.
+        img.src = `cameras/${cam.id}/snapshot?t=${Date.now()}`;
+        shot.append(img);
+        const d = await json(`cameras/${cam.id}/describe`);
+        shot.append(el("div", "cam-desc", d.description));
+      } catch (e) {
+        shot.append(el("div", "cam-desc", "Could not reach it: " + e.message));
+      }
+      look.textContent = "look";
+      look.disabled = false;
+    });
+    meta.append(look);
+
+    const del = el("button", "ghost", "remove");
+    del.type = "button";
+    del.style.marginLeft = "0";
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      await json("cameras/" + cam.id, {method: "DELETE"});
+      loadCameras();
+    });
+    meta.append(del);
+    row.append(meta);
+    list.append(row);
+  }
+}
+
+$("#cam-add").addEventListener("click", async () => {
+  const name = $("#cam-name").value.trim(), url = $("#cam-url").value.trim();
+  if (!name || !url) return;
+  $("#cam-add").disabled = true;
+  try {
+    await send("cameras", {name, url}, "POST");
+    $("#cam-name").value = "";
+    $("#cam-url").value = "";
+  } catch (e) {
+    $("#cam-note").textContent = "Could not add: " + e.message;
+  }
+  $("#cam-add").disabled = false;
+  loadCameras();
+});
 
 /* -------------------------------------------------------------- memory -- */
 async function loadMemories() {

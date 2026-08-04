@@ -21,6 +21,7 @@ from pydantic import BaseModel
 import activity
 import auth
 import backup
+import cameras
 import chat
 import files
 import memory
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
     await auth.init()
     await activity.init()
     await chat.init()
+    await cameras.init()
     asyncio.create_task(backup.scheduler())
     asyncio.create_task(memory.compactor())
     yield
@@ -114,6 +116,7 @@ app.include_router(files.router)  # same
 app.include_router(wake.router)
 app.include_router(memory.router)
 app.include_router(backup.router)
+app.include_router(cameras.router)
 
 
 class InferRequest(BaseModel):

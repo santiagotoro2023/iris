@@ -1229,3 +1229,47 @@ The unblocked alternative, if he would rather not: speechbrain's ECAPA-TDNN spea
 embeddings are ungated and already installed in the wake word training image.
 Clustering those over Whisper's segments gives "speaker 1 / speaker 2" without names
 or a token, which is most of the value. **ASK USER** before building either.
+
+
+## 30. Phase 4 Part One — Looking at Cameras
+
+Santiago: *"move on to phase 4"*. Built the half that needs no decisions from him.
+
+**IRiS can look at a camera and say what it sees.** A frame is pulled from the stream
+with ffmpeg and handed to the vision model that already reads uploaded images, so the
+whole feature is a camera registry plus a tool. Cameras are added in the UI with their
+stream URL; `look_at_camera` is registered in the tool loop, so "is anyone at the
+front door?" resolves in chat.
+
+**Credentials never leave this service intact.** Stream URLs carry a password that is
+usually reused across a household's devices, so cameras are admin-only and everything
+outbound is masked: the browser, the activity log, and ffmpeg's stderr, which echoes
+the URL verbatim on failure. Two bugs were caught here by testing rather than reading:
+
+- The first masking pattern was lazy and leaked the tail of any password containing
+  a colon: `rtsps://user:p@ss:word@cam.local` became `rtsps://user:____@ss:word@...`.
+  Now greedy to the last `@` in the authority.
+- `-rtsp_transport tcp` was passed unconditionally, and ffmpeg refuses the whole
+  command when the input is not RTSP. That would have broken every `http://` snapshot
+  URL, which is how a good many cameras expose a still.
+
+RTSP is forced over TCP because UDP loses packets on wifi cameras and produces smeared
+frames the vision model then earnestly describes as fog.
+
+Verified with a generated clip standing in for a camera: a frame is captured as real
+JPEG, the cache returns the second request in 0.0 ms instead of waking the stream
+again, the vision model correctly reported "a test pattern for television or video
+equipment", and a dead host raises an error with no password in it.
+
+### Still open in Phase 4
+
+**Frigate**, §5's choice for the NVR half: continuous recording, motion and object
+detection, event history and retention. Deliberately not built blind, because it needs
+three things that cannot be guessed:
+
+1. **The camera inventory** — makes, models, and whether they offer a substream. The
+   original **ASK USER** in §8 stands.
+2. **A hardware acceleration decision.** The 3060 Ti is already shared between the
+   language model, Whisper and the vision model. Frigate doing continuous detection on
+   it changes the VRAM budget that every earlier phase was tuned around.
+3. **Retention and storage**, which interacts with §26's backups and the media volume.

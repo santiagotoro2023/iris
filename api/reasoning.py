@@ -101,6 +101,22 @@ async def _recall(query: str):
     return "\n".join(f"- {h['text']}" for h in hits)
 
 
+@tool("look_at_camera",
+      "Look at what a home camera can see right now and describe it. Use this "
+      "whenever asked what is happening somewhere in the house, whether anyone is at "
+      "a door, or whether something has been delivered.",
+      {"type": "object",
+       "properties": {"camera": {"type": "string",
+                                 "description": "The camera's name, as configured."}},
+       "required": ["camera"]})
+async def _look_at_camera(camera: str):
+    import cameras
+    if not settings.get("cameras.enabled"):
+        return "Cameras are switched off."
+    out = await cameras.describe(camera)
+    return f"{out['camera']}: {out['description']}"
+
+
 @tool("web_search",
       "Search the live web. Use this whenever the answer depends on anything you are "
       "not certain of: current events, a specific company, person, product, place, "
@@ -237,7 +253,9 @@ async def stream(messages: list[dict], model: str | None = None,
     memory_off = user_id is None or not settings.get("memory.enabled")
     tools = [schema for name, (schema, _) in TOOLS.items()
              if not (name == "web_search" and policy == "off")
-             and not (name in ("remember", "recall") and memory_off)]
+             and not (name in ("remember", "recall") and memory_off)
+             and not (name == "look_at_camera"
+                      and not settings.get("cameras.enabled"))]
 
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):

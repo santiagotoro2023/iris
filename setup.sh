@@ -236,6 +236,8 @@ install() {
   echo "  Settings   http://localhost:8000/"
   echo "  API        http://localhost:8000/healthz"
   echo
+  echo "  Cameras, memories, voice and backups are all configured in the UI."
+  echo
   echo "  First sign-in: creator / 1234 — you are asked to change it immediately."
   echo "  Everything else is configured in that UI, not here."
 }

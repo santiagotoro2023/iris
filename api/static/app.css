@@ -351,3 +351,14 @@ button { font: inherit; color: inherit; }
 .mem-meta .ghost { margin-left: auto; padding: .15rem .5rem; font-size: .68rem; }
 .mem-kind { border: 1px solid var(--line); padding: 0 .35rem; }
 .mem-score { color: var(--orange); }
+
+/* ------------------------------------------------------------ cameras --- */
+.cam-url { font-family: var(--mono); font-size: .7rem; color: var(--dim);
+           overflow-wrap: anywhere; }
+.cam-shot:not(:empty) { margin: .5rem 0; }
+.cam-shot img { display: block; width: 100%; max-width: 34rem;
+                border: 1px solid var(--line); }
+.cam-desc { font-size: .84rem; line-height: 1.5; color: var(--text);
+            border-left: 2px solid var(--orange); padding: .35rem .7rem;
+            margin-top: .5rem; max-width: 34rem; }
+.mem-meta .ghost + .ghost { margin-left: .5rem; }

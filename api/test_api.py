@@ -15,6 +15,7 @@ import persona
 import reasoning
 import settings
 import backup
+import cameras
 import memory
 import voice
 
@@ -428,6 +429,34 @@ def test_compaction_expires_old_transcripts_and_nothing_else():
     r, result = asyncio.run(scenario(0))
     assert result["removed"] == 0
     assert len(asyncio.run(r.hgetall(chat._index_key(7)))) == 5
+
+
+def test_camera_passwords_are_never_exposed():
+    """A camera password is typically reused across a household's devices, so it must
+    not reach a browser, the activity log, or a model's context. Punctuation in the
+    password is the case that breaks a naive pattern."""
+    cases = {
+        "rtsp://admin:hunter2@192.168.1.50:554/Streaming/Channels/101":
+            "rtsp://admin:____@192.168.1.50:554/Streaming/Channels/101",
+        # A colon and an at-sign inside the password: a lazy match leaks the tail.
+        "rtsps://user:p@ss:word@cam.local/stream": "rtsps://user:____@cam.local/stream",
+        # Nothing to hide must be left exactly alone.
+        "http://192.168.1.9/snapshot.jpg": "http://192.168.1.9/snapshot.jpg",
+        "rtsp://192.168.1.50:554/stream": "rtsp://192.168.1.50:554/stream",
+    }
+    for raw, expected in cases.items():
+        assert cameras.mask(raw) == expected, (raw, cameras.mask(raw))
+    for raw in cases:
+        masked = cameras.mask(raw)
+        for secret in ("hunter2", "p@ss:word", "ss:word", "word"):
+            assert secret not in masked or secret in raw.split("@")[-1], (raw, masked)
+
+
+def test_a_camera_row_sent_to_a_client_carries_no_password():
+    import datetime
+    row = (3, "front door", "rtsp://admin:hunter2@10.0.0.5/stream", True,
+           datetime.datetime(2026, 8, 4, tzinfo=datetime.timezone.utc))
+    assert "hunter2" not in json.dumps(cameras._public(row))
 
 
 def test_backup_delete_cannot_escape_the_backup_directory():

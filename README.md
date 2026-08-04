@@ -214,6 +214,23 @@ count and whether to include conversations are all settings; the Memory tab has 
 > sync you like covers that: an rsync cron to a NAS, a Tailscale copy to another
 > node, or an external drive.
 
+## Cameras
+
+Add a camera in the **Cameras** tab with its stream URL (`rtsp://…`, or the
+`http://…/snapshot.jpg` endpoint many cameras expose). *look* pulls a frame and has
+the vision model describe it, and IRiS gets a `look_at_camera` tool, so "is anyone at
+the front door?" works in chat.
+
+Stream URLs contain credentials, so cameras are admin-only and the password is masked
+in everything that leaves the server — the browser, the activity log, and ffmpeg's own
+error text, which otherwise echoes the URL back verbatim. A frame is reused for 10
+seconds by default rather than waking the camera again.
+
+> Frigate — continuous recording, motion and object detection, event history — is
+> [SPEC.md §5](./SPEC.md)'s choice for the NVR half and is **not built yet**. It needs
+> per-camera tuning, a hardware-acceleration decision and the actual camera inventory.
+> Looking on demand needs none of that, which is why it came first.
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,

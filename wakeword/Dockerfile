@@ -25,6 +25,10 @@ RUN pip3 install --no-cache-dir \
       deep-phonemizer==0.0.19 webrtcvad-wheels==2.0.14 piper-phonemize==1.1.0 \
       onnx==1.17.0 onnxruntime==1.20.1 requests==2.32.3 scikit-learn==1.5.2
 
+# datasets 2.14.6 (the version the upstream pipeline pins) calls pa.PyExtensionType,
+# which pyarrow removed in 15. Its own layer so the large install above stays cached.
+RUN pip3 install --no-cache-dir "pyarrow==14.0.2"
+
 # openWakeWord itself, same --no-deps reasoning as the api image: its metadata
 # demands a tflite-runtime that does not exist for this Python either.
 RUN pip3 install --no-cache-dir --no-deps openwakeword==0.6.0 \

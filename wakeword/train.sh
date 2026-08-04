@@ -26,7 +26,10 @@ mkdir -p "$DATA" data/wakewords data/wakeword-out
 sed -e "s|__PHRASE__|$PHRASE|" -e "s|__NAME__|$NAME|" \
     wakeword/config.template.yml > "$DATA/$NAME.yml"
 
-run() { docker run --rm -it --device nvidia.com/gpu=all \
+# -t only when there is a terminal, so an unattended run does not fail on "input
+# device is not a TTY".
+TTY=""; [ -t 0 ] && TTY="-it"
+run() { docker run --rm $TTY --device nvidia.com/gpu=all \
           -v "$DATA:/work/datasets" -v "$PWD/data/wakeword-out:/work/out" \
           -v "$PWD/wakeword:/work/scripts:ro" iris-wakeword-train "$@"; }
 

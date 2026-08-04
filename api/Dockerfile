@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
-# pg_dump for backups; openssl (already present) encrypts the archive.
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+# pg_dump for backups; ffmpeg pulls a frame from a camera's RTSP stream.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir \
       fastapi==0.115.6 httpx==0.28.1 \
@@ -23,6 +23,6 @@ RUN pip install --no-cache-dir \
  && python -c "import openwakeword.utils as u; u.download_models()"
 
 COPY main.py settings.py auth.py reasoning.py persona.py activity.py chat.py \
-     voice.py files.py wake.py memory.py backup.py ./
+     voice.py files.py wake.py memory.py backup.py cameras.py ./
 COPY static ./static
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
