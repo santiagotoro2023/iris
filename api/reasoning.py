@@ -532,8 +532,12 @@ _BARE_URL = re.compile(r"(?<![\w(])https?://[^\s<>)\]]+")
 
 
 def strip_links(text: str) -> str:
-    """Keep the words, drop the address."""
-    text = _MD_LINK.sub(r"\1", text)
+    """Drop a bare URL; keep a markdown link, which the chat renders clickable.
+
+    Stripping both left "Route: Google Maps" as dead text, which is worse than
+    either. A titled link is short and useful; a raw 140-character maps URL in the
+    middle of a sentence is not.
+    """
     text = _BARE_URL.sub("", text)
     # "Full route: ." and "see  for details" are what removal leaves behind.
     text = re.sub(r"[ \t]*\(\s*\)", "", text)

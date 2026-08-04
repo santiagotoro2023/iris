@@ -148,6 +148,30 @@ def _minutes(duration: str | None) -> str:
     return f"{total // 60}h {total % 60:02d}"
 
 
+# The API says "B", "S", "IC". A person says bus, S-Bahn, InterCity, and being told
+# "take the direct train" for a bus is simply wrong.
+_MODES = {"B": "bus", "BUS": "bus", "NFB": "bus", "TRO": "trolleybus",
+          "T": "tram", "NFT": "tram", "M": "metro",
+          "S": "S-Bahn", "SN": "night S-Bahn", "R": "regional train",
+          "RE": "regional express", "IR": "InterRegio", "IC": "InterCity",
+          "ICE": "ICE", "EC": "EuroCity", "TGV": "TGV", "PB": "cable car",
+          "FUN": "funicular", "GB": "gondola", "BAT": "boat"}
+
+
+def _legs(conn: dict) -> str:
+    """What you actually board, in order."""
+    out = []
+    for section in conn.get("sections") or []:
+        journey = section.get("journey")
+        if not journey:
+            continue
+        category = (journey.get("category") or "").upper()
+        mode = _MODES.get(category, category.lower() or "service")
+        number = (journey.get("number") or "").strip()
+        out.append(f"{mode} {number}".strip())
+    return ", then ".join(out)
+
+
 def maps_link(origin: str, destination: str) -> str:
     """A link he can open and check, which is the point of showing the sources."""
     return ("https://www.google.com/maps/dir/?api=1&travelmode=transit"
@@ -180,10 +204,11 @@ async def journey(origin: str, destination: str, when: str | None = None) -> str
         platform = (dep.get("platform") or "").strip()
         # Departure AND arrival, spelled out: "20:09 to 20:28" was being relayed as a
         # departure with no arrival at all.
+        legs = _legs(conn)
         lines.append(
-            f"- departs {_clock(dep.get('departure'))}, "
-            f"arrives {_clock(arr.get('arrival'))}, "
-            f"{_minutes(conn.get('duration'))}"
+            f"- {legs or 'service'}: departs {origin} at "
+            f"{_clock(dep.get('departure'))}, arrives {destination} at "
+            f"{_clock(arr.get('arrival'))}, {_minutes(conn.get('duration'))}"
             + (f", platform {platform}" if platform else "")
             + (", direct" if changes == 0 else f", {changes} change"
                + ("s" if changes and changes > 1 else "")))

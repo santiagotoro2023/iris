@@ -147,14 +147,12 @@ def test_em_dashes_never_reach_the_client():
     assert reasoning.strip_dashes("one \u2013 two") == "one, two"
 
 
-def test_links_are_stripped_from_replies():
-    """The tool banner beside a reply already carries every link, and a 140-character
-    maps URL in a sentence makes the sentence unreadable. Prompting did not hold."""
-    assert reasoning.strip_links(
-        "Full route: [Google Maps](https://maps.google.com/x?a=1&b=2)") \
-        == "Full route: Google Maps"
-    assert reasoning.strip_links("Their site is [sidmar.ch](https://sidmar.ch/).") \
-        == "Their site is sidmar.ch."
+def test_a_bare_url_goes_but_a_titled_link_stays():
+    """A raw 140-character maps URL mid-sentence is unreadable. Stripping the titled
+    ones too left "Route: Google Maps" as dead text, which is worse than either."""
+    kept = reasoning.strip_links(
+        "Route: [Google Maps](https://maps.google.com/x?a=1&b=2)")
+    assert "maps.google.com" in kept and "[Google Maps]" in kept
     assert "http" not in reasoning.strip_links("See https://example.com/a for more.")
 
 
@@ -169,7 +167,8 @@ def test_a_link_split_across_tokens_is_not_cut_in_half():
         out.append(reasoning.strip_links(ready))
     out.append(reasoning.strip_links(buffer))
     whole = "".join(out)
-    assert whole == "See Google Maps for more.", whole
+    # Intact, not cut in half: the renderer turns it into a clickable link.
+    assert whole == "See [Google Maps](https://example.com/a?b=1) for more.", whole
 
 
 def test_an_ordinary_bracket_does_not_stall_the_stream():
@@ -574,6 +573,20 @@ def test_clock_times_are_read_as_times():
     assert "twelve" in voice.speech_text("At 12:30.")       # not "zero"
     # A version number is not a time and must be left alone.
     assert "1.2" in voice.speech_text("Version 1.2 is out.")
+
+
+def test_a_bus_is_not_called_a_train():
+    """It said "take the direct train" for a bus 842. The API says "B"; a person says
+    bus, and the mode is what tells you which stop to stand at."""
+    conn = {"sections": [{"journey": {"category": "B", "number": "842"}},
+                         {"journey": {"category": "S", "number": "5"}},
+                         {"walk": {"duration": 300}}]}
+    assert places._legs(conn) == "bus 842, then S-Bahn 5"
+    assert places._legs({"sections": [{"journey": {"category": "IC", "number": "1"}}]}) \
+        == "InterCity 1"
+    # An unknown code degrades to something readable rather than blank.
+    assert places._legs({"sections": [{"journey": {"category": "XYZ"}}]}) == "xyz"
+    assert places._legs({"sections": [{"walk": {"duration": 60}}]}) == ""
 
 
 def test_journey_duration_is_readable_aloud():

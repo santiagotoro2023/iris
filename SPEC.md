@@ -1711,3 +1711,44 @@ Also fixed: markdown links were never rendered anywhere in the chat, so every li
 IRiS had ever produced was dead text. And `syncHandsFree()` was called by both the
 click handler and the live settings feed, so the microphone was opened, and failed,
 twice, which is why the no-microphone notice appeared twice.
+
+
+## 46. Voice Broke Because Memory Took the VRAM
+
+"transcription failed: CUDA failed with error out of memory", and with it the wake
+word, which wakes and records and then cannot transcribe.
+
+Measured: **7,303 MiB of 8,192 in use, 890 free.** Whisper large-v3 needs around 1.5
+GB. The cause is partly my own: automatic recall (§25) embeds every turn, and bge-m3
+then sat in VRAM indefinitely for the sake of a few milliseconds' work.
+
+Two fixes:
+
+- **Whisper falls back to the CPU on an out-of-memory error** rather than failing the
+  recording, and stays there for ten minutes so every following request does not
+  repeat the same failed attempt. Slower, and it works, which beats fast and broken.
+  The device used is reported back.
+- **The embedder is asked for a 60-second keep-alive.** It is needed for milliseconds
+  a few times a turn; holding VRAM between turns only starved the thing that needed
+  it.
+
+Verified with the GPU full: a synthesised sentence transcribed verbatim on CPU, and
+the whole hands-free loop still runs, "Hey iris." through to a transcript.
+
+**A stale override was also found**: `voice.wake_sensitivity` was still 0.5 from
+before the default moved to 0.85, and at 0.5 the trained model fires on "the iris"
+(§32 measured it at 0.702). Corrected.
+
+## 47. A Bus Is Not a Train
+
+`transport.opendata.ch` returns a category code, "B" or "S" or "IC", which was
+discarded. IRiS said "take the direct train" for bus 842. Each connection now names
+what you actually board, leg by leg: "bus 842, then S-Bahn 5, then InterRegio 70".
+
+It also shortened "Oetwil am See, Gusch" to "Oetwil am See", which is a different
+place and not the one he is standing in. The persona now requires the stop name
+exactly as the tool gave it.
+
+**And links came back.** §45 stripped titled links along with bare URLs, which left
+"Route: Google Maps" as dead text: worse than either. Only a bare URL is noise now; a
+markdown link is short, useful, and renders as a link.

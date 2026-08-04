@@ -25,6 +25,17 @@ _model: WhisperModel | None = None
 _last_used = 0.0
 _idle_unload = float(os.environ.get("STT_IDLE_UNLOAD", "300"))
 
+# The GPU is shared with the language model, which holds ~5 GB and leaves too little
+# for Whisper. Rather than failing the recording, fall back to the CPU and remember
+# that for a while, so every following request does not pay the same failed attempt.
+_cpu_until = 0.0
+CPU_FALLBACK_SECONDS = 600
+
+
+def _is_oom(err: Exception) -> bool:
+    text = str(err).lower()
+    return "out of memory" in text or "cuda failed" in text or "cublas" in text
+
 
 def _release() -> None:
     """Free VRAM. Caller holds _lock."""
@@ -79,6 +90,7 @@ def preload():
 @app.get("/health")
 def health():
     return {"ok": True, "loaded": _loaded, "idle_unload_seconds": _idle_unload,
+            "on_cpu_until": max(0.0, _cpu_until - time.monotonic()),
             "default": [DEFAULT_MODEL, DEFAULT_DEVICE, DEFAULT_COMPUTE]}
 
 
@@ -103,15 +115,35 @@ async def transcribe(
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)
         path = f.name
-    try:
-        whisper = _get_model(model, device, compute)
+    global _cpu_until
+    on_cpu = device == "cpu" or time.monotonic() < _cpu_until
+
+    def run(dev: str, comp: str):
+        whisper = _get_model(model, dev, comp)
         segments, info = whisper.transcribe(
             path,
             language=None if language == "auto" else language,
             vad_filter=vad,
             beam_size=5,
         )
-        text = "".join(s.text for s in segments).strip()
+        return "".join(s.text for s in segments).strip(), info
+
+    try:
+        try:
+            text, info = run("cpu" if on_cpu else device,
+                             "int8" if on_cpu else compute)
+        except Exception as e:
+            if on_cpu or not _is_oom(e):
+                raise
+            # The language model is holding the GPU. Say so once, in the log, and
+            # get the transcription done anyway.
+            print(f"[stt] GPU is full ({e}); falling back to CPU for "
+                  f"{CPU_FALLBACK_SECONDS}s", flush=True)
+            with _lock:
+                _release()
+            _cpu_until = time.monotonic() + CPU_FALLBACK_SECONDS
+            on_cpu = True
+            text, info = run("cpu", "int8")
     except Exception as e:
         raise HTTPException(500, f"transcription failed: {e}")
     finally:
@@ -119,4 +151,5 @@ async def transcribe(
 
     return {"text": text, "language": info.language,
             "language_probability": round(info.language_probability, 3),
-            "duration": round(info.duration, 2)}
+            "duration": round(info.duration, 2),
+            "device": "cpu" if on_cpu else device}

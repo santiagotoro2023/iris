@@ -92,8 +92,11 @@ settings.setting(
 async def embed(texts: list[str]) -> list[list[float]]:
     model = settings.get("memory.embed_model")
     async with httpx.AsyncClient(timeout=120) as c:
+        # keep_alive is short on purpose: embedding takes milliseconds and runs a
+        # few times a turn, but the model sat in VRAM afterwards and helped starve
+        # Whisper, which needs ~1.5 GB it could not get.
         r = await c.post(f"{OLLAMA_URL}/api/embed",
-                         json={"model": model, "input": texts})
+                         json={"model": model, "input": texts, "keep_alive": "60s"})
     if r.status_code != 200:
         raise HTTPException(502, f"embedding failed ({model}): {r.text[:200]}")
     return r.json()["embeddings"]
