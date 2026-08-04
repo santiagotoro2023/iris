@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -39,8 +40,40 @@ SEARCH_POLICY = {
     "off":        "SEARCH POLICY: web search is disabled. Say so if a question needs it.",
 }
 
-# name -> (ollama tool schema, callable). Later phases register integrations here.
-TOOLS: dict[str, tuple[dict, callable]] = {}
+@dataclass
+class Tool:
+    """A tool is its schema, its implementation, and how it announces itself.
+
+    Presentation lives here rather than in the client because a tool that the UI has
+    to be taught about separately is not a tool you can just add. `activity` is
+    formatted with the call's own arguments, so the chat says what IRiS is actually
+    doing rather than "Running transit".
+    """
+    schema: dict
+    fn: callable
+    activity: str = "Working"
+    display: str = "text"       # text | sources | lines
+
+
+# name -> Tool. Later phases register integrations here.
+TOOLS: dict[str, Tool] = {}
+
+
+class _Blanks(dict):
+    """A missing argument leaves a gap, never a KeyError mid-reply."""
+    def __missing__(self, key):
+        return ""
+
+
+def announce(name: str, arguments: dict | None) -> str:
+    spec = TOOLS.get(name)
+    if not spec:
+        return f"Running {name}"
+    try:
+        text = spec.activity.format_map(_Blanks(arguments or {}))
+    except Exception:
+        text = spec.activity
+    return " ".join(text.split()).rstrip(",") or f"Running {name}"
 
 # Quick commands (SPEC.md 33). A directive prepended to the turn, which is enough to
 # aim an 8B model at the right tool without taking the decision away from it. Adding
@@ -79,6 +112,13 @@ QUICK_COMMANDS: dict[str, dict] = {
         "directive": "Store this with the remember tool, exactly as the user means "
                      "it, then confirm in one short sentence.",
     },
+    "weather": {
+        "label": "Weather",
+        "hint": "optional: a place",
+        "directive": "Use the weather tool. Give the numbers and whether to expect "
+                     "rain, in a sentence or two.",
+        "needs": "location.enabled",
+    },
     "find": {
         "label": "Find a place",
         "hint": "what to find, e.g. a pharmacy",
@@ -106,19 +146,22 @@ def apply_command(name: str, text: str) -> str:
     return f"{spec['directive']}\n\n{text}"
 
 
-def tool(name: str, description: str, parameters: dict):
+def tool(name: str, description: str, parameters: dict,
+         activity: str = "", display: str = "text"):
     schema = {"type": "function",
-              "function": {"name": name, "description": description, "parameters": parameters}}
+              "function": {"name": name, "description": description,
+                           "parameters": parameters}}
 
     def register(fn):
-        TOOLS[name] = (schema, fn)
+        TOOLS[name] = Tool(schema, fn, activity or f"Running {name}", display)
         return fn
 
     return register
 
 
 @tool("current_time", "Current date and time in the user's local timezone.",
-      {"type": "object", "properties": {}})
+      {"type": "object", "properties": {}},
+      activity="Checking the clock")
 def _current_time():
     # An ISO string gets misread (it reported "3 PM" for 01:44), so spell it out.
     tz = settings.get("general.timezone")
@@ -135,7 +178,8 @@ def _current_time():
                                "description": "The fact, written as a standalone "
                                               "sentence that will still make sense "
                                               "months from now."}},
-       "required": ["text"]})
+       "required": ["text"]},
+      activity="Remembering that")
 async def _remember(text: str):
     user_id = CURRENT_USER.get()
     if user_id is None:
@@ -153,7 +197,8 @@ async def _remember(text: str):
       {"type": "object",
        "properties": {"query": {"type": "string",
                                 "description": "What you are trying to remember."}},
-       "required": ["query"]})
+       "required": ["query"]},
+      activity="Searching what I remember about {query}", display="lines")
 async def _recall(query: str):
     user_id = CURRENT_USER.get()
     if user_id is None:
@@ -168,7 +213,8 @@ async def _recall(query: str):
       "Look in the user's configured mailboxes and report what has arrived. Use this "
       "for any question about email, messages waiting, or whether someone has "
       "replied.",
-      {"type": "object", "properties": {}})
+      {"type": "object", "properties": {}},
+      activity="Looking in the mailbox", display="lines")
 async def _check_mail():
     import integrations
     return await integrations.check_all_mail()
@@ -184,7 +230,8 @@ async def _check_mail():
            "destination": {"type": "string", "description": "Where it ends."},
            "when": {"type": "string",
                     "description": "Optional departure time as HH:MM. Omit for now."}},
-       "required": ["origin", "destination"]})
+       "required": ["origin", "destination"]},
+      activity="Checking the timetable, {origin} to {destination}", display="lines")
 async def _transit(origin: str, destination: str, when: str = ""):
     import places
     return await places.journey(origin, destination, when or None)
@@ -196,7 +243,8 @@ async def _transit(origin: str, destination: str, when: str = ""):
       {"type": "object",
        "properties": {"station": {"type": "string",
                                   "description": "Station or stop name, or 'home'."}},
-       "required": ["station"]})
+       "required": ["station"]},
+      activity="Reading the board at {station}", display="lines")
 async def _departures(station: str):
     import places
     return await places.departures(station)
@@ -212,10 +260,23 @@ async def _departures(station: str):
                                     "shop', 'Bahnhofstrasse 12'."},
            "near": {"type": "string",
                     "description": "Optional town or address to search around."}},
-       "required": ["query"]})
+       "required": ["query"]},
+      activity="Looking on the map for {query} {near}", display="lines")
 async def _find_place(query: str, near: str = ""):
     import places
     return await places.find_place(query, near)
+
+
+@tool("weather",
+      "The current weather and the forecast for today and tomorrow. Use this for any "
+      "question about the weather, what to wear, or whether to take an umbrella.",
+      {"type": "object",
+       "properties": {"place": {"type": "string",
+                                "description": "Town or address. Omit for home."}}},
+      activity="Checking the weather {place}", display="lines")
+async def _weather(place: str = ""):
+    import places
+    return await places.weather(place)
 
 
 @tool("look_at_camera",
@@ -225,7 +286,8 @@ async def _find_place(query: str, near: str = ""):
       {"type": "object",
        "properties": {"camera": {"type": "string",
                                  "description": "The camera's name, as configured."}},
-       "required": ["camera"]})
+       "required": ["camera"]},
+      activity="Looking at the {camera} camera")
 async def _look_at_camera(camera: str):
     import cameras
     if not settings.get("cameras.enabled"):
@@ -242,7 +304,8 @@ async def _look_at_camera(camera: str):
        "properties": {"query": {"type": "string",
                                 "description": "Search terms. Include distinguishing "
                                                "detail such as a place or industry."}},
-       "required": ["query"]})
+       "required": ["query"]},
+      activity='Searching the web for "{query}"', display="sources")
 def _web_search(query: str):
     r = httpx.get(f"{SEARXNG_URL}/search",
                   params={"q": query, "format": "json"}, timeout=25)
@@ -318,7 +381,7 @@ async def _run_tool(call: dict) -> tuple[str, str]:
     # A failing tool reports back to the model instead of 500ing the request, so it
     # can recover or explain rather than the whole turn dying.
     try:
-        result = TOOLS[name][1](**fn.get("arguments", {}))
+        result = TOOLS[name].fn(**fn.get("arguments", {}))
         if inspect.isawaitable(result):          # memory tools reach the network
             result = await result
         return name, str(result)
@@ -368,12 +431,12 @@ async def stream(messages: list[dict], model: str | None = None,
                               "content": system["content"] + "\n\n" + recalled}
 
     memory_off = user_id is None or not settings.get("memory.enabled")
-    tools = [schema for name, (schema, _) in TOOLS.items()
+    tools = [spec.schema for name, spec in TOOLS.items()
              if not (name == "web_search" and policy == "off")
              and not (name in ("remember", "recall") and memory_off)
              and not (name == "look_at_camera"
                       and not settings.get("cameras.enabled"))
-             and not (name in ("transit", "departures", "find_place")
+             and not (name in ("transit", "departures", "find_place", "weather")
                       and not settings.get("location.enabled"))]
 
     async with httpx.AsyncClient(timeout=600) as c:
@@ -423,10 +486,21 @@ async def stream(messages: list[dict], model: str | None = None,
             for call in tool_calls:
                 fn = call.get("function", {})
                 yield {"type": "tool_start", "name": fn.get("name", "?"),
+                       "label": announce(fn.get("name", "?"),
+                                         fn.get("arguments")),
                        "arguments": fn.get("arguments", {})}
                 name, result = await _run_tool(call)
-                messages.append({"role": "tool", "tool_name": name, "content": result})
-                yield {"type": "tool", "name": name, "content": result}
+                spec = TOOLS.get(name)
+                label = announce(name, fn.get("arguments"))
+                # Stored on the message too, so reopening a conversation shows the
+                # same line rather than a bare tool name.
+                messages.append({"role": "tool", "tool_name": name,
+                                 "label": label,
+                                 "display": spec.display if spec else "text",
+                                 "content": result})
+                yield {"type": "tool", "name": name, "label": label,
+                       "display": spec.display if spec else "text",
+                       "content": result}
 
     yield {"type": "error", "detail": f"tool loop exceeded {MAX_TOOL_HOPS} hops"}
 

@@ -404,3 +404,9 @@ button { font: inherit; color: inherit; }
 .chip-x { background: none; border: 0; color: inherit; cursor: pointer;
           font-size: 1rem; line-height: 1; padding: 0 .25rem; }
 .chip-x:hover { color: var(--text); }
+
+/* Tool results: one look for every tool, with the line the tool declared. */
+.tool-tick { color: var(--orange); margin-right: .45rem; }
+.tool-count { margin-left: auto; font-size: .66rem; color: var(--dim); }
+.tool-lineitem { padding: .18rem 0; line-height: 1.5; }
+.tool-lineitem + .tool-lineitem { border-top: 1px solid var(--line); }

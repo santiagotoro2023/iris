@@ -184,12 +184,12 @@ ranks the distilled fact above the raw chunk it came from.
 
 ## Transit and places
 
-Two integrations that need no account, so they work the moment IRiS is installed:
-Swiss public transport via **transport.opendata.ch** and place lookup via
-OpenStreetMap's **Nominatim**. IRiS gets three tools — a journey, a departure board,
-and a place search — so "when's the next train to Zurich?" and "where's the nearest
-pharmacy?" are answered from the live timetable and the map rather than from a web
-search.
+Three services that need no account, so they work the moment IRiS is installed: Swiss
+public transport via **transport.opendata.ch**, place lookup via OpenStreetMap's
+**Nominatim**, and forecasts from **Open-Meteo**. IRiS gets four tools — a journey, a
+departure board, a place search and the weather — so "when's the next train to
+Zurich?", "where's the nearest pharmacy?" and "do I need a coat?" are answered from
+live data rather than from a web search.
 
 Set **Home** and **Work** in Settings and the words work as words: "the next train
 home" resolves without naming the stop. Left empty, IRiS asks rather than guessing.
@@ -279,10 +279,30 @@ too, since it echoes the whole URL on failure.
 > [SPEC.md §5](./SPEC.md)'s choice for the NVR half and is **not built yet**. It needs
 > per-camera tuning, a hardware-acceleration decision and the actual camera inventory.
 
+## Tools announce themselves
+
+Everything IRiS does on your behalf is a tool, and every tool says what it is doing
+while it does it — the same spinner-then-collapsed-summary the web search has always
+had. *"Checking the timetable, Winterthur to Zurich HB"*, *"Looking on the map for a
+pharmacy"*, *"Looking at the front door camera"*.
+
+That line is part of the tool's declaration, not something the UI is taught:
+
+```python
+@tool("weather", "...", {...},
+      activity="Checking the weather {place}", display="lines")
+```
+
+The label is formatted with the call's own arguments and travels on the event, so a
+new tool appears in the chat correctly with no client work at all. `display` picks how
+the result is shown — `sources` for search hits with links, `lines` for a list,
+`text` otherwise. The label is stored on the message too, so reopening a conversation
+shows the same line rather than a bare tool name.
+
 ## Quick commands
 
 The lightning button in the composer picks a command — *Transit*, *Look at a camera*,
-*Check mail*, *Search the web*, *Remember this*, *Find a place* — and a chip appears
+*Check mail*, *Search the web*, *Remember this*, *Weather*, *Find a place* — and a chip appears
 above the box. What you type is then aimed at the right tool without the decision
 being taken away from the model. The command applies to one turn and clears itself,
 and the transcript stores what you actually typed, not the directive.

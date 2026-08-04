@@ -1429,3 +1429,47 @@ padding.
 Event-driven triggers — a camera seeing someone, mail from a particular sender,
 something in memory falling due — need a rules UI, which is the natural next use of
 the registry in §33: a `rule` kind with a trigger type and an action type.
+
+
+## 35. Tools Announce Themselves
+
+Santiago, verbatim:
+
+> If its doing something like generating the daily report, doing something like
+> getting travel routes, checking google maps for things like cafes nearby etc.
+> basically everything it does proactively and or by yknow just generally doing it
+> there should be some indicator, like with the web search. all of these things are
+> 'tools' and all of them should show some message of what its doing like the web
+> search does now, they shouldnt be separate features but more like dynamic tools
+> that can be added to easily yknow
+
+He is right, and the old code proved it: `tool_start` was already emitted for every
+tool, but the client special-cased `web_search` and rendered everything else as
+"Running transit". A tool the UI has to be taught about separately is not a tool you
+can just add.
+
+**Presentation moved into the declaration.** `TOOLS` now holds a `Tool` dataclass
+carrying `activity` and `display` alongside the schema and the function:
+
+    @tool("transit", "...", {...},
+          activity="Checking the timetable, {origin} to {destination}",
+          display="lines")
+
+`activity` is formatted with the call's own arguments and travels on both the
+`tool_start` and `tool` events, so the chat says what IRiS is actually doing. A
+missing argument leaves a gap rather than raising mid-reply, and an unregistered tool
+still gets a sane line. `display` chooses the result rendering: `sources` (titles with
+links, as the web search always had), `lines`, or `text`.
+
+**The client knows no tool names.** One `toolActivity()` and one `toolResult()` render
+whatever arrives. The label and display mode are stored on the tool message too, so
+reopening an old conversation shows the same line instead of a bare name; messages
+from before this change fall back gracefully.
+
+`_MODEL_KEYS` already filtered unknown keys before messages reach Ollama, so the extra
+fields never confuse the model.
+
+**Proof that it worked:** adding the weather afterwards was one decorator and one
+quick-command entry. No endpoint, no client change, and it appeared in the chat
+announcing "Checking the weather", in the quick-command menu, and in the daily
+briefing.

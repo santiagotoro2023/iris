@@ -51,6 +51,10 @@ settings.setting(
     title="Include mail in the briefing",
     description="Only has an effect once a mailbox is set up under Integrations.")
 settings.setting(
+    "proactive.weather", type="boolean", default=True,
+    title="Include the weather",
+    description="Today's forecast for Home. Needs Home set under Settings.")
+settings.setting(
     "proactive.commute", type="boolean", default=True,
     title="Include the commute",
     description="Next departures from Home to Work. Needs both set under Settings.")
@@ -79,6 +83,12 @@ async def gather() -> list[str]:
     parts: list[str] = []
     now = _now()
     parts.append(now.strftime("It is %H:%M on %A, %d %B %Y."))
+
+    if settings.get("proactive.weather") and settings.get("location.enabled"):
+        try:
+            parts.append(await places.weather())
+        except Exception as e:
+            print(f"[proactive] weather lookup failed: {e}", flush=True)
 
     if settings.get("proactive.commute") and settings.get("location.enabled"):
         home, work = settings.get("location.home"), settings.get("location.work")

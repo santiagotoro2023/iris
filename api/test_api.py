@@ -624,9 +624,27 @@ def test_backup_prunes_only_the_oldest_beyond_the_limit(tmp_path=None):
 def test_web_search_tool_is_registered():
     """IRiS must search rather than guess (SPEC.md 18)."""
     assert "web_search" in reasoning.TOOLS
-    schema = reasoning.TOOLS["web_search"][0]["function"]
+    schema = reasoning.TOOLS["web_search"].schema["function"]
     assert "query" in schema["parameters"]["properties"]
     assert "search" in schema["description"].lower()
+
+
+def test_every_tool_says_what_it_is_doing():
+    """A tool the UI has to be taught about separately is not a tool you can just
+    add, so the announcement is part of the declaration (SPEC.md 35)."""
+    for name, spec in reasoning.TOOLS.items():
+        assert spec.activity and spec.activity != f"Running {name}", \
+            f"{name} has no activity line"
+        assert spec.display in ("text", "sources", "lines"), (name, spec.display)
+
+
+def test_an_announcement_survives_missing_arguments():
+    """Formatting happens mid-reply, so a gap must never become a KeyError."""
+    assert reasoning.announce("find_place", {"query": "a pharmacy"}) \
+        == "Looking on the map for a pharmacy"
+    assert reasoning.announce("transit", {}) == "Checking the timetable, to"
+    assert reasoning.announce("nope", {}) == "Running nope"
+    assert reasoning.announce("web_search", None)
 
 
 def test_think_omitted_for_non_thinking_models():

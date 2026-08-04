@@ -483,6 +483,55 @@ function parseSources(content) {
   return out;
 }
 
+/* Every tool announces itself the same way: a spinner and the line the tool
+   declared, then a collapsed summary you can open. Nothing here knows the name of
+   any particular tool, which is the point. */
+function toolActivity(label) {
+  const b = el("div", "msg tool searching");
+  const line = el("div", "tool-line");
+  const spin = el("span", "thinking");
+  spin.append(el("i"), el("i"), el("i"));
+  line.append(spin, el("span", null, label || "Working"));
+  b.append(line);
+  return b;
+}
+
+function toolResult(label, content, display) {
+  const box = document.createElement("details");
+  box.className = "tool-result";
+  const head = document.createElement("summary");
+  head.append(el("span", "tool-tick", "\u2713"), el("span", null, label || "Done"));
+  box.append(head);
+  const body = el("div", "tool-detail");
+  if (display === "sources") {
+    const sources = parseSources(content);
+    for (const s of sources) {
+      const row = el("div", "src");
+      row.append(el("div", "src-title", s.title));
+      if (s.url) {
+        const a = document.createElement("a");
+        a.className = "src-url";
+        a.href = s.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = s.url;
+        row.append(a);
+      }
+      if (s.snippet) row.append(el("div", "src-snip", s.snippet));
+      body.append(row);
+    }
+    head.append(el("span", "tool-count", `${sources.length} source${sources.length === 1 ? "" : "s"}`));
+    if (!sources.length) body.append(el("div", "src-snip", content));
+  } else if (display === "lines") {
+    for (const line of String(content).split("\n").filter(Boolean))
+      body.append(el("div", "tool-lineitem", line.replace(/^[-*]\s*/, "")));
+  } else {
+    body.append(el("div", "src-snip", content));
+  }
+  box.append(body);
+  return box;
+}
+
 function searchResult(query, content) {
   const sources = parseSources(content);
   const box = document.createElement("details");
@@ -658,12 +707,13 @@ function paintChat(messages) {
       log.append(bubble("user", m.content, m.attachments));
     } else if (m.role === "tool") {
       const b = el("div", "msg tool");
-      if (m.tool_name === "web_search") {
-        const call = lastCalls.find(c => c?.function?.name === "web_search");
-        b.append(searchResult(call?.function?.arguments?.query ?? "", m.content));
-      } else {
-        b.append(el("div", "tool-line", `${m.tool_name}: ${m.content}`));
-      }
+      // Conversations from before tools carried a label fall back to the call itself.
+      const call = lastCalls.find(c => c?.function?.name === m.tool_name);
+      const label = m.label || (m.tool_name === "web_search" && call
+        ? `Searching the web for "${call.function.arguments?.query ?? ""}"`
+        : `Ran ${m.tool_name}`);
+      b.append(toolResult(label, m.content,
+                          m.display || (m.tool_name === "web_search" ? "sources" : "text")));
       log.append(b);
     } else if (m.role === "assistant") {
       lastCalls = m.tool_calls || [];
@@ -719,27 +769,18 @@ async function sendMessage() {
       }
       if (stick) log.scrollTop = log.scrollHeight;
     } else if (ev.type === "tool_start") {
-      const q = ev.arguments?.query ?? "";
-      const b = el("div", "msg tool searching");
-      b.dataset.query = q;
-      const line = el("div", "tool-line");
-      const spin = el("span", "thinking");
-      spin.append(el("i"), el("i"), el("i"));
-      line.append(spin, el("span", null, ev.name === "web_search"
-        ? `Searching the web${q ? ` for "${q}"` : ""}` : `Running ${ev.name}`));
-      b.append(line);
+      const b = toolActivity(ev.label);
+      b.dataset.label = ev.label || "";
       log.insertBefore(b, live);
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "tool") {
       // Replace the in-flight indicator rather than stacking a second bubble.
       const pending = [...log.querySelectorAll(".msg.tool.searching")].pop();
       const target = pending || el("div", "msg tool");
-      const query = target.dataset?.query || "";
       target.className = "msg tool";
       target.textContent = "";
-      target.append(ev.name === "web_search"
-        ? searchResult(query, ev.content)
-        : el("div", "tool-line", `${ev.name}: ${ev.content.slice(0, 200)}`));
+      target.append(toolResult(ev.label || target.dataset?.label, ev.content,
+                               ev.display));
       if (!pending) log.insertBefore(target, live);
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "done") {
