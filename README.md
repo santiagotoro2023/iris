@@ -173,8 +173,14 @@ Only the verbatim record expires: whatever IRiS learned from a conversation was
 distilled into a memory when the exchange happened and is kept. Set it to 0 to keep
 everything forever.
 
-> Not yet built: audio ingestion and speaker diarization. Everything else in Phase 3
-> is done.
+**Ingesting a recording.** The Memory tab takes an audio or video file, transcribes
+it, chunks the transcript on sentence boundaries and stores it, then distils any
+durable facts out of it through the same evidenced extractor. Searching afterwards
+ranks the distilled fact above the raw chunk it came from.
+
+> Not yet built: speaker diarization. pyannote's models are gated behind a
+> HuggingFace licence that has to be accepted with an account, so it needs a decision
+> rather than more work.
 
 ## Backups
 

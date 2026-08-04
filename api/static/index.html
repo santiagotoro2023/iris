@@ -105,6 +105,12 @@
                aria-label="New memory">
         <button class="btn" id="mem-save" type="button">Remember</button>
       </div>
+      <div class="mem-add">
+        <input type="file" id="ingest-input" hidden accept="audio/*,video/*">
+        <span class="desc" id="ingest-note" style="flex:1;margin:0">Transcribe a
+          recording into searchable memory.</span>
+        <button class="ghost" id="ingest" type="button">ingest a recording</button>
+      </div>
       <div id="mem-list"><div class="empty">loading…</div></div>
     </div>
 
@@ -1112,6 +1118,29 @@ $("#mem-save").addEventListener("click", async () => {
   $("#mem-save").disabled = false;
   loadMemories();
 });
+$("#ingest").addEventListener("click", () => $("#ingest-input").click());
+$("#ingest-input").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const note = $("#ingest-note");
+  $("#ingest").disabled = true;
+  note.textContent = `Transcribing ${file.name}…`;
+  try {
+    const form = new FormData();
+    form.append("audio", file);
+    const r = await api("memory/ingest", {method: "POST", body: form});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || `error ${r.status}`);
+    note.textContent = `${file.name}: ${d.chunks} chunk${d.chunks === 1 ? "" : "s"}`
+      + (d.facts.length ? `, learned ${d.facts.length} fact${d.facts.length === 1 ? "" : "s"}` : "");
+  } catch (err) {
+    note.textContent = "Could not ingest: " + err.message;
+  }
+  e.target.value = "";
+  $("#ingest").disabled = false;
+  loadMemories();
+});
+
 $("#mem-new").addEventListener("keydown", e => {
   if (e.key === "Enter") { e.preventDefault(); $("#mem-save").click(); }
 });

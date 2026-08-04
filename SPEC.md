@@ -1203,6 +1203,29 @@ conversation is kept and a 31-day-old one is not, `0` removes nothing at all, th
 transcript body is deleted alongside its index entry rather than orphaned in Redis,
 and other users are untouched. All of that is pinned by a test with a fake Redis.
 
-### Still open in Phase 3
+## 29. Audio Ingestion
 
-Audio ingestion and speaker diarization (pyannote). Everything else is done.
+A recording goes in and two different things come out, which is the point: the
+**verbatim record**, chunked and embedded so it can be searched, and any **durable
+facts** in it, distilled through the same evidenced extractor as a chat turn (§27).
+The chunks are episodic; the facts are what IRiS actually learned.
+
+Chunking splits on sentence boundaries only. A chunk cut mid-sentence embeds badly,
+because half a thought is close to nothing, and one sentence of overlap keeps a fact
+that straddles a boundary retrievable from either side.
+
+Verified end to end with our own Piper voice as the speaker: a synthesised meeting was
+transcribed, chunked and stored, three correct facts were distilled from it, and
+asking "how long are transcripts kept" returned the distilled fact at 0.799 above the
+raw transcript chunk at 0.614 — which is the ranking that makes this worth doing.
+
+### Still open in Phase 3: diarization
+
+**Blocked on Santiago, not on work.** pyannote's speaker-diarization models are gated
+on HuggingFace: using them means accepting the model licence with a HuggingFace
+account and issuing a read token. Nothing in IRiS can do that on his behalf.
+
+The unblocked alternative, if he would rather not: speechbrain's ECAPA-TDNN speaker
+embeddings are ungated and already installed in the wake word training image.
+Clustering those over Whisper's segments gives "speaker 1 / speaker 2" without names
+or a token, which is most of the value. **ASK USER** before building either.

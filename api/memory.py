@@ -21,7 +21,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 import activity
@@ -249,6 +249,30 @@ async def add(body: NewMemory, user: dict = Depends(auth.active_user)):
     return out
 
 
+@router.post("/ingest")
+async def ingest(audio: UploadFile = File(...),
+                 user: dict = Depends(auth.active_user)):
+    """A recording in, searchable memory out (SPEC.md Phase 3 ingestion)."""
+    import voice
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "empty audio")
+    if len(data) > voice.MAX_AUDIO_BYTES:
+        raise HTTPException(413, "recording too large")
+    result = await voice.transcribe_bytes(data, audio.filename or "recording.webm",
+                                          audio.content_type or "audio/webm")
+    text = (result.get("text") or "").strip()
+    if not text:
+        raise HTTPException(422, "nothing audible in that recording")
+    label = audio.filename or "recording"
+    out = await ingest_transcript(text, user["id"], label)
+    await activity.record(
+        "memory.ingest",
+        f"{label}: {result.get('duration', '?')}s, {out['chunks']} chunks, "
+        f"{len(out['facts'])} facts", user["username"])
+    return {"transcript": text, "language": result.get("language"), **out}
+
+
 @router.delete("/{point_id}")
 async def delete(point_id: str, user: dict = Depends(auth.active_user)):
     await forget(point_id)
@@ -413,3 +437,62 @@ async def compactor() -> None:
                     f"{result['kept']} kept", "schedule")
         except Exception as e:
             print(f"[memory] compaction failed: {e}", flush=True)
+
+
+# --------------------------------------------------------------- ingest ----
+
+CHUNK_CHARS = 600
+CHUNK_OVERLAP = 1          # sentences carried into the next chunk for continuity
+
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def chunk(text: str, size: int = CHUNK_CHARS) -> list[str]:
+    """Split a transcript on sentence boundaries, never mid-sentence.
+
+    A chunk cut through a sentence embeds badly: half a thought is close to nothing.
+    One sentence of overlap keeps a fact that straddles a boundary retrievable from
+    either side.
+    """
+    sentences = [s.strip() for s in _SENTENCE.split(text.strip()) if s.strip()]
+    chunks: list[str] = []
+    current: list[str] = []
+    for sentence in sentences:
+        current.append(sentence)
+        if sum(len(s) + 1 for s in current) >= size:
+            chunks.append(" ".join(current))
+            current = current[-CHUNK_OVERLAP:] if CHUNK_OVERLAP else []
+    tail = " ".join(current)
+    # The overlap is already in the previous chunk; only keep a tail that adds something.
+    if tail and (not chunks or tail not in chunks[-1]):
+        chunks.append(tail)
+    return chunks
+
+
+async def ingest_transcript(text: str, user_id: int, label: str,
+                            when: float | None = None) -> dict:
+    """Store a recording's transcript as searchable memory, and distil it as well.
+
+    Two different things come out of one recording: the verbatim record, chunked so
+    it can be searched, and any durable facts in it. The chunks are episodic and
+    expire with the retention window's spirit; the facts are what IRiS actually
+    learned.
+    """
+    pieces = chunk(text)
+    if not pieces:
+        return {"chunks": 0, "facts": []}
+    vectors = await embed(pieces)
+    await _ensure_collection(len(vectors[0]))
+    created = when or time.time()
+    points = [{"id": str(uuid.uuid4()), "vector": v,
+               "payload": {"text": p, "kind": "transcript", "source": label,
+                           "user_id": user_id, "created": created}}
+              for p, v in zip(pieces, vectors)]
+    async with httpx.AsyncClient(timeout=120) as c:
+        r = await c.put(f"{QDRANT_URL}/collections/{COLLECTION}/points",
+                        params={"wait": "true"}, json={"points": points})
+    if r.status_code >= 300:
+        raise HTTPException(502, f"qdrant: {r.text[:200]}")
+
+    facts = await capture([{"role": "user", "content": text}], user_id)
+    return {"chunks": len(pieces), "facts": facts}
