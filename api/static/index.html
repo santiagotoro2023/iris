@@ -216,8 +216,30 @@
 
 <script src="app.js"></script>
 <script>
-const {$, el, api, json, send, Combo, Stepper, Toggle} = window.IRiS;
+const {$, el, api, json, send, upload, Combo, Stepper, Toggle} = window.IRiS;
 let SCHEMA = {}, VALUES = {}, CONTROLS = {}, CONV = null, BUSY = false;
+let replyAbort = null;
+
+/* Send does one of three things, so it says which. */
+function sendButtonState() {
+  const btn = $("#send");
+  if (BUSY) {
+    btn.textContent = "Stop";
+    btn.classList.add("secondary");
+    btn.disabled = false;
+    btn.title = "Stop generating";
+  } else if (UPLOADS.size) {
+    btn.textContent = "Send";
+    btn.classList.remove("secondary");
+    btn.disabled = true;
+    btn.title = "Waiting for the upload to finish";
+  } else {
+    btn.textContent = "Send";
+    btn.classList.remove("secondary");
+    btn.disabled = false;
+    btn.title = "";
+  }
+}
 
 /* ---------------------------------------------------------------- tabs -- */
 document.querySelectorAll(".tab").forEach(tab => {
@@ -903,10 +925,11 @@ function paintChat(messages) {
 async function sendMessage() {
   const box = $("#composer");
   const text = box.value.trim();
-  if ((!text && !ATTACHMENTS.length) || BUSY) return;
+  if ((!text && !ATTACHMENTS.length) || BUSY || UPLOADS.size) return;
   const sending = ATTACHMENTS.slice();
   BUSY = true;
-  $("#send").disabled = true;
+  replyAbort = new AbortController();
+  sendButtonState();
   box.value = "";
   box.style.height = "auto";
 
@@ -975,7 +998,8 @@ async function sendMessage() {
 
   try {
     const r = await api("chat/stream", {
-      method: "POST", headers: {"content-type": "application/json"},
+      method: "POST", signal: replyAbort.signal,
+      headers: {"content-type": "application/json"},
       body: JSON.stringify({content: text, conversation_id: CONV,
                             command: COMMAND?.name,
                             attachments: ATTACHMENTS.length ? ATTACHMENTS : undefined}),
@@ -1002,11 +1026,18 @@ async function sendMessage() {
     loadConversations();
   } catch (e) {
     pipeline?.stop();
-    if (first) live.remove();
-    log.append(bubble("tool", "error: " + e.message));
+    if (e.name === "AbortError") {
+      // Stopped on purpose. Keep whatever arrived and say so plainly.
+      if (first) live.remove();
+      else live.body.append(el("div", "stopped", "stopped"));
+    } else {
+      if (first) live.remove();
+      log.append(bubble("tool", "error: " + e.message));
+    }
   } finally {
     BUSY = false;
-    $("#send").disabled = false;
+    replyAbort = null;
+    sendButtonState();
     box.focus();
   }
 }
@@ -1102,9 +1133,16 @@ document.addEventListener("click", e => {
   }
 });
 
-$("#send").addEventListener("click", sendMessage);
+$("#send").addEventListener("click", () => {
+  if (BUSY) {
+    replyAbort?.abort();
+    stopSpeech();
+    return;
+  }
+  sendMessage();
+});
 $("#composer").addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#send").click(); }
 });
 $("#composer").addEventListener("input", e => {
   e.target.style.height = "auto";
@@ -1126,6 +1164,7 @@ $("#brief-now").addEventListener("click", async () => {
 });
 
 $("#new-chat").addEventListener("click", () => {
+  abandonTurn();
   CONV = null;
   paintChat([]);
   showView("chat");
@@ -1142,6 +1181,7 @@ function showView(name) {
 }
 
 async function openConversation(id, {focusChat = false} = {}) {
+  abandonTurn();
   CONV = id;
   paintChat((await json(`chat/conversations/${id}`)).messages);
   document.querySelectorAll(".conv-item").forEach(n =>
@@ -1172,30 +1212,87 @@ function renderAttachBar() {
 }
 
 $("#attach").addEventListener("click", () => $("#file-input").click());
+/* A bar for the part that has a length, and dots for the part that does not: the
+   bytes going up can be measured, the model reading them cannot. */
+/* Every upload in flight, so leaving the conversation can stop them. */
+const UPLOADS = new Set();
+
+function cancelUploads() {
+  for (const controller of UPLOADS) controller.abort();
+  UPLOADS.clear();
+  sendButtonState();
+}
+
+/* Leaving a conversation abandons everything that belonged to it: the reply still
+   being written, the speech reading it out, and any file still going up. */
+function abandonTurn() {
+  replyAbort?.abort();
+  stopSpeech();
+  cancelUploads();
+  ATTACHMENTS = [];
+  renderAttachBar();
+}
+
+function progressChip(file, controller) {
+  const node = el("span", "chip pending");
+  const label = el("span", "chip-name");
+  const size = file.size > 2 ** 20 ? ` · ${(file.size / 2 ** 20).toFixed(1)} MB` : "";
+  label.textContent = `${file.name}${size}`;
+  const bar = el("span", "progress");
+  const fill = el("i");
+  bar.append(fill);
+  const pct = el("span", "progress-pct", "0%");
+  const stop = el("button", "chip-x", "\u00d7");
+  stop.type = "button";
+  stop.title = "Cancel this upload";
+  stop.setAttribute("aria-label", `Cancel uploading ${file.name}`);
+  stop.addEventListener("click", () => controller.abort());
+  node.append(label, bar, pct, stop);
+  return {
+    node,
+    set(fraction) {
+      const p = Math.max(0, Math.min(1, fraction));
+      fill.style.width = `${(p * 100).toFixed(0)}%`;
+      pct.textContent = `${(p * 100).toFixed(0)}%`;
+    },
+    reading() {
+      bar.remove();
+      pct.remove();
+      stop.remove();          // the bytes are sent; there is nothing left to cancel
+      const spin = el("span", "thinking");
+      spin.append(el("i"), el("i"), el("i"));
+      node.append(spin);
+      label.textContent = `reading ${file.name}`;
+    },
+  };
+}
+
 $("#file-input").addEventListener("change", async e => {
   const file = e.target.files?.[0];
   e.target.value = "";
   if (!file) return;
 
-  const pending = el("span", "chip pending");
-  const spin = el("span", "thinking");
-  spin.append(el("i"), el("i"), el("i"));
-  const size = file.size > 2 ** 20 ? ` (${Math.round(file.size / 2 ** 20)} MB)` : "";
-  pending.append(spin, el("span", "chip-name", `uploading ${file.name}${size}…`));
-  $("#attach-bar").append(pending);
+  const controller = new AbortController();
+  UPLOADS.add(controller);
+  sendButtonState();
+  const pending = progressChip(file, controller);
+  $("#attach-bar").append(pending.node);
 
   try {
     const form = new FormData();
     form.append("file", file);
-    const r = await api("files/analyze", {method: "POST", body: form});
-    pending.querySelector(".chip-name").textContent = `reading ${file.name}…`;
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || `error ${r.status}`);
+    const data = await upload("files/analyze", form, pending.set, controller.signal);
+    pending.reading();
     ATTACHMENTS.push(data);
     renderAttachBar();
   } catch (err) {
-    pending.remove();
-    $("#chat-log").append(bubble("tool", `could not read ${file.name}: ${err.message}`));
+    pending.node.remove();
+    // A cancellation is a decision, not a failure, and needs no report.
+    if (err.name !== "AbortError")
+      $("#chat-log").append(bubble("tool", `could not read ${file.name}: ${err.message}`));
+  } finally {
+    UPLOADS.delete(controller);
+    sendButtonState();
   }
 });
 
@@ -1817,17 +1914,23 @@ $("#ingest-input").addEventListener("change", async e => {
   if (!file) return;
   const note = $("#ingest-note");
   $("#ingest").disabled = true;
-  note.textContent = `Transcribing ${file.name}…`;
+  const controller = new AbortController();
+  UPLOADS.add(controller);
+  const chip = progressChip(file, controller);
+  note.textContent = "";
+  note.append(chip.node);
   try {
     const form = new FormData();
     form.append("audio", file);
-    const r = await api("memory/ingest", {method: "POST", body: form});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || `error ${r.status}`);
+    const d = await upload("memory/ingest", form, chip.set, controller.signal);
+    chip.reading();
     note.textContent = `${file.name}: ${d.chunks} chunk${d.chunks === 1 ? "" : "s"}`
       + (d.facts.length ? `, learned ${d.facts.length} fact${d.facts.length === 1 ? "" : "s"}` : "");
   } catch (err) {
-    note.textContent = "Could not ingest: " + err.message;
+    note.textContent = err.name === "AbortError" ? "Upload cancelled."
+                                                 : "Could not ingest: " + err.message;
+  } finally {
+    UPLOADS.delete(controller);
   }
   e.target.value = "";
   $("#ingest").disabled = false;
@@ -1874,6 +1977,9 @@ async function loadConversations({selectLatest = false} = {}) {
     del.setAttribute("aria-label", `Delete conversation: ${c.title}`);
     del.addEventListener("click", async e => {
       e.stopPropagation();
+      // Deleting the conversation being written to stops the writing, and the
+      // reading aloud with it.
+      if (c.id === CONV) abandonTurn();
       await api(`chat/conversations/${c.id}`, {method: "DELETE"});
       if (CONV === c.id) { CONV = null; paintChat([]); }
       loadConversations();

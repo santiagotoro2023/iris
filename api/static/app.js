@@ -24,6 +24,43 @@ async function api(path, opts) {
   }
   return r;
 }
+/* fetch cannot report upload progress at all, so an upload that takes a minute
+   looks identical to one that has stalled. XHR can, and that is the only reason it
+   is here. Same-origin, so the session cookie rides along as usual. */
+function upload(path, formData, onProgress, signal) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    if (signal) {
+      if (signal.aborted) { xhr.abort(); return reject(new DOMException("aborted", "AbortError")); }
+      signal.addEventListener("abort", () => xhr.abort(), {once: true});
+    }
+    xhr.upload.addEventListener("progress", e => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    });
+    // The bytes are gone; what follows is the server reading them, which has no
+    // progress to report.
+    xhr.upload.addEventListener("load", () => onProgress(1));
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401 || xhr.status === 403) {
+        location.href = "login.html";
+        reject(new Error("unauthenticated"));
+        return;
+      }
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not json */ }
+      if (xhr.status >= 400) reject(new Error(data.detail || `error ${xhr.status}`));
+      else resolve(data);
+    });
+    xhr.addEventListener("error", () => reject(new Error("the upload failed")));
+    // An AbortError so callers can tell a cancellation from a failure and stay quiet
+    // about it.
+    xhr.addEventListener("abort", () =>
+      reject(new DOMException("the upload was cancelled", "AbortError")));
+    xhr.send(formData);
+  });
+}
+
 async function json(path, opts) {
   const r = await api(path, opts);
   const data = await r.json().catch(() => ({}));
@@ -187,7 +224,7 @@ function Toggle({checked, onChange, labelledBy}) {
   return b;
 }
 
-window.IRiS = {$, el, api, json, send, Combo, Stepper, Toggle};
+window.IRiS = {$, el, api, json, send, upload, Combo, Stepper, Toggle};
 })();
 
 /* ---------------------------------------------------------- backdrop --- */

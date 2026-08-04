@@ -199,6 +199,11 @@ Only the verbatim record expires: whatever IRiS learned from a conversation was
 distilled into a memory when the exchange happened and is kept. Set it to 0 to keep
 everything forever.
 
+Uploads show a real progress bar, with a cross to cancel one mid-flight. **Send**
+becomes **Stop** while a reply is being written and is blocked while a file is still
+going up. Leaving or deleting a conversation abandons everything that belonged to it:
+the reply being written, the speech reading it out, and any upload in flight.
+
 **Ingesting a recording.** The Memory tab takes an audio or video file, transcribes
 it, chunks the transcript on sentence boundaries and stores it, then distils any
 durable facts out of it through the same evidenced extractor. Searching afterwards

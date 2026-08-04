@@ -1879,3 +1879,25 @@ stop they chose and why.
 The honest limit: a desktop without GPS positions itself by wifi and will drift by a
 village. The preferred stop setting exists for that, and no amount of asking the
 browser more often fixes it.
+
+
+## 52. Uploads, and Stopping Things
+
+**A progress bar, because there is progress to show.** `fetch` cannot report upload
+progress at all, so a minute-long upload looked identical to a stalled one: three dots
+either way. `upload()` uses XHR for that one reason. The bar covers the bytes going
+up, which have a length; once they are sent it becomes dots again, because the model
+reading them does not.
+
+**A cross to cancel**, wired to an `AbortController`. A cancellation rejects with an
+`AbortError` so callers can tell a decision from a failure and stay quiet about it.
+
+**Send becomes Stop while a reply is being written**, aborting the stream and the
+speech with it, and is blocked while a file is still uploading. One button, three
+states, each saying which it is in.
+
+**Leaving a conversation abandons what belonged to it.** `abandonTurn()` aborts the
+reply being written, stops the audio reading it out, cancels uploads in flight and
+clears the attachments. Called when switching conversations, starting a new one, and
+deleting the one currently being written to, where previously the reply carried on
+being generated and read aloud into a conversation that no longer existed.

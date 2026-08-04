@@ -520,3 +520,15 @@ button { font: inherit; color: inherit; }
   .hud span:nth-child(n+3) { display: none; }
   .wordmark { display: none; }
 }
+
+/* Upload progress: a bar for the bytes, which have a length. */
+.progress { display: inline-block; width: 5rem; height: .32rem; background: #0b0c0e;
+            border: 1px solid var(--line); overflow: hidden; flex: none; }
+.progress i { display: block; height: 100%; width: 0; background: var(--orange);
+              transition: width .12s linear; }
+.progress-pct { font-family: var(--mono); font-size: .62rem; color: var(--dim);
+                min-width: 2.4rem; text-align: right; }
+
+.stopped { font-family: var(--mono); font-size: .64rem; letter-spacing: .12em;
+           text-transform: uppercase; color: var(--dim); margin-top: .4rem; }
+.chip.pending .chip-x { margin-left: .1rem; }
