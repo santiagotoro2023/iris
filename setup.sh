@@ -17,7 +17,7 @@ EMBED_DEFAULT="bge-m3"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
            data/searxng data/media data/media/frigate data/media/uploads data/wakewords
-           data/frigate
+           data/frigate data/tls
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -140,6 +140,35 @@ $WAKE_WORDS
 EOF
 }
 
+# TLS. Self-signed, because the alternative is asking him to run a public web server
+# to prove he owns a name he already owns. Regenerated only when it is missing or
+# has expired, so the browser's "trust this" only has to be answered once a decade.
+ensure_tls() {
+  local crt=data/tls/iris.crt key=data/tls/iris.key host names
+  if [ -f "$crt" ] && openssl x509 -checkend 2592000 -noout -in "$crt" >/dev/null 2>&1; then
+    return 0
+  fi
+  host="$(grep -E '^IRIS_HOSTNAME=' .env 2>/dev/null | cut -d= -f2- || true)"
+  host="${host:-$(hostname -f 2>/dev/null || hostname)}"
+  # Every name the browser might use, or it complains about the name rather than
+  # the signature and that cannot be clicked past as easily.
+  names="DNS:localhost,DNS:$host,DNS:*.$host,IP:127.0.0.1"
+  for ip in $(hostname -I 2>/dev/null); do names="$names,IP:$ip"; done
+  if have tailscale; then
+    for ip in $(tailscale ip 2>/dev/null); do names="$names,IP:$ip"; done
+  fi
+  log "Generating a self-signed certificate for $host..."
+  mkdir -p data/tls
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+    -keyout "$key" -out "$crt" -subj "/CN=$host" \
+    -addext "subjectAltName=$names" \
+    -addext "basicConstraints=CA:FALSE" \
+    -addext "keyUsage=digitalSignature,keyEncipherment" \
+    -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
+  chmod 600 "$key"
+  echo "  Names on the certificate: $names"
+}
+
 # SearXNG needs a secret in its config file. Generated here so it never enters the repo.
 ensure_searxng() {
   local cfg=data/searxng/settings.yml
@@ -165,6 +194,7 @@ ensure_env() {
   add_env IRIS_EMBED_MODEL "$EMBED_DEFAULT"
   add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
   add_env IRIS_THINK ""
+  add_env IRIS_HOSTNAME "$(hostname -f 2>/dev/null || hostname)"
   # Without this key every archive is unreadable, so it is generated once and then
   # never regenerated: add_env leaves an existing value alone.
   add_env IRIS_BACKUP_KEY "$(openssl rand -hex 32)"
@@ -226,6 +256,7 @@ install() {
   setup_tailscale
   ensure_env
   ensure_searxng
+  ensure_tls
   ensure_wakewords
   log "Building and starting services..."
   dc up -d --build
@@ -239,8 +270,8 @@ install() {
   fi
   log "Done. IRiS is running."
   echo
-  echo "  Settings   http://localhost:8000/"
-  echo "  API        http://localhost:8000/healthz"
+  echo "  IRiS       https://localhost:8000/"
+  echo "  The certificate is self-signed, so the browser will ask once."
   echo
   echo "  Cameras, memories, voice and backups are all configured in the UI."
   echo

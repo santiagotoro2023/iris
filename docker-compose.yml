@@ -57,7 +57,7 @@ services:
       IRIS_BACKUP_KEY: ${IRIS_BACKUP_KEY:-}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-}
-      IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-0}
+      IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-1}
     volumes:
       # Custom wake word models only. The bundled ones live in the image.
       - ./data/wakewords:/wakewords
@@ -66,6 +66,8 @@ services:
       # Frigate's config is generated from the device registry, not hand-written.
       - ./data/frigate:/frigate
       - ./data/media/uploads:/media/uploads
+      # A certificate here makes the API serve https instead of http.
+      - ./data/tls:/tls:ro
     depends_on:
       ollama:
         condition: service_started
@@ -76,7 +78,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${IRIS_BIND:-0.0.0.0}:8000:8000"
 
   stt:
     build: ./stt

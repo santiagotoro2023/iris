@@ -1752,3 +1752,41 @@ exactly as the tool gave it.
 **And links came back.** §45 stripped titled links along with bare URLs, which left
 "Route: Google Maps" as dead text: worse than either. Only a bare URL is noise now; a
 markdown link is short, useful, and renders as a link.
+
+
+## 48. HTTPS, and a Backdrop
+
+Santiago: *"Can we make it have a self signed certificate and run on https on port
+8000 instead of http please?"*
+
+`setup.sh` generates a self-signed certificate into `./data/tls/` and the API serves
+HTTPS when one is mounted, plain HTTP when it is not, so an install without a
+certificate still starts. The certificate names `localhost`, the hostname, every LAN
+address and the Tailscale address: with the name wrong the browser complains about the
+name instead of the signature, and that is the harder warning to get past. Ten years,
+regenerated only when missing or nearly expired, so "trust this" is answered once.
+
+`IRIS_COOKIE_SECURE` now defaults to 1, and the port binds to all interfaces rather
+than loopback, because a phone cannot reach `127.0.0.1`.
+
+This also settles the microphone caveat carried since §2: the microphone, hands-free
+listening and geolocation all require a secure context, and now there is one.
+
+**On exposing it: yes, and two warnings.** Forwarding 443 to 8000 works. But a
+self-signed certificate warns in every browser and phones make that harder to click
+past, so with a name he already owns a Let's Encrypt certificate is strictly better.
+And once it faces the internet the login is the only thing between the world and
+every conversation, memory and credential in the system, so the seeded password has
+to go first. Tailscale avoids both.
+
+**The backdrop.** A field of points drifting slowly, joined by lines when they pass
+near each other, a few in the accent colour. Density follows the viewport area, so a
+phone draws a handful and a monitor draws a field. It stops when the tab is hidden and
+draws a single static frame when the machine asks for reduced motion. The engineering
+grid stays underneath, fainter.
+
+**Width.** The column was pinned at 880px, which left a wide monitor two thirds empty.
+It now grows to 1080 and then 1280 as the screen does, and stops there because longer
+lines are harder to read, not easier. Below 720px the tabs scroll instead of wrapping,
+the composer puts the text box on its own row, and cards go single-column; below
+420px the wordmark and the quieter HUD fields step aside for the chat.

@@ -26,4 +26,5 @@ RUN pip install --no-cache-dir \
 # missing module fails at import on container start rather than at build.
 COPY *.py ./
 COPY static ./static
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY entrypoint.sh /entrypoint.sh
+CMD ["/entrypoint.sh"]

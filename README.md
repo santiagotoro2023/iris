@@ -2,6 +2,25 @@
 
 Locally-run PDA-style assistant. Build spec and phase plan: [SPEC.md](./SPEC.md).
 
+## HTTPS
+
+IRiS serves **https on port 8000**. `setup.sh` generates a self-signed certificate
+into `./data/tls/`, naming `localhost`, this machine's hostname, every LAN address it
+has and its Tailscale address, so the browser complains about the signature rather
+than the name. Accept it once. The certificate lasts ten years and is only regenerated
+when it is missing or within a month of expiry.
+
+The microphone, hands-free listening and geolocation all need a secure context, so
+this is what makes them work anywhere but `localhost`.
+
+> **Reaching it from outside.** Forwarding your router's 443 to this host's 8000 does
+> work, with two things worth knowing. A self-signed certificate makes every browser
+> warn, and phones make that harder to click past than desktops; if the name is
+> already yours, a real certificate from Let's Encrypt removes the warning entirely.
+> And once it is on the internet, the login is the only thing between the world and
+> everything IRiS knows, so change the password off `1234` first. Tailscale avoids
+> both problems by not exposing anything.
+
 ## Install
 
 ```bash
@@ -85,10 +104,8 @@ speech model is **released after 5 minutes idle** and reloaded on the next recor
 (~3 s cold, 0.6 s warm). Tune that with *Release speech model after* in Settings; `0`
 keeps it loaded permanently.
 
-> **Microphone needs a secure context.** Browsers only grant `getUserMedia` on
-> `localhost` or HTTPS. Over plain-HTTP Tailscale the mic button will refuse. Run
-> `tailscale serve https / http://127.0.0.1:8000` to terminate TLS, and set
-> `IRIS_COOKIE_SECURE=1` once you do.
+> The microphone and geolocation both need a secure context, which HTTPS provides.
+> `setup.sh` generates the certificate, so this is handled.
 
 Text-to-speech runs in its own service with two selectable engines. **Piper** is the
 default: CPU-only, 25-33x realtime, and it ships 11 explicitly British (`en_GB`) voices.

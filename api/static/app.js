@@ -189,3 +189,100 @@ function Toggle({checked, onChange, labelledBy}) {
 
 window.IRiS = {$, el, api, json, send, Combo, Stepper, Toggle};
 })();
+
+/* ---------------------------------------------------------- backdrop --- */
+/* A slow constellation behind the app: points drifting, lines drawn between the
+   ones that happen to be near each other. Quiet enough to read over, and it gives
+   the grid something to do besides sit there.
+
+   Density follows the viewport so a phone draws a handful and a monitor draws a
+   field, and the whole thing stops when the tab is hidden or when the machine has
+   asked for less motion. */
+(function backdrop() {
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const canvas = document.createElement("canvas");
+  canvas.className = "backdrop";
+  canvas.setAttribute("aria-hidden", "true");
+  document.body.prepend(canvas);
+  const ctx = canvas.getContext("2d", {alpha: true});
+
+  let points = [], w = 0, h = 0, dpr = 1, raf = null;
+  const LINK = 140;                    // how close two points must be to connect
+
+  function size() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = canvas.clientWidth;
+    h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // One point per ~22k px², so the field looks the same on a phone and a monitor.
+    const want = Math.max(14, Math.min(90, Math.round((w * h) / 22000)));
+    points = Array.from({length: want}, () => ({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.14,
+      vy: (Math.random() - 0.5) * 0.14,
+      warm: Math.random() < 0.16,      // a few carry the accent colour
+    }));
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of points) {
+      p.x += p.vx;
+      p.y += p.vy;
+      // Wrap rather than bounce: bouncing makes the edges look like walls.
+      if (p.x < -20) p.x = w + 20;
+      if (p.x > w + 20) p.x = -20;
+      if (p.y < -20) p.y = h + 20;
+      if (p.y > h + 20) p.y = -20;
+    }
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i], b = points[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > LINK * LINK) continue;
+        const near = 1 - Math.sqrt(d2) / LINK;
+        ctx.strokeStyle = (a.warm || b.warm)
+          ? `rgba(255,122,26,${(near * 0.20).toFixed(3)})`
+          : `rgba(140,152,170,${(near * 0.13).toFixed(3)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+    for (const p of points) {
+      ctx.fillStyle = p.warm ? "rgba(255,122,26,.55)" : "rgba(160,172,190,.34)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.warm ? 1.6 : 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (raf || still) return;
+    raf = requestAnimationFrame(frame);
+  }
+  function stop() {
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+  }
+
+  size();
+  if (still) frame(), stop();          // draw it once, then leave it alone
+  else start();
+
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { size(); if (still) { frame(); stop(); } }, 150);
+  });
+  // Nothing to animate for a tab nobody is looking at.
+  document.addEventListener("visibilitychange", () =>
+    document.hidden ? stop() : start());
+})();
