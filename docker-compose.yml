@@ -65,6 +65,7 @@ services:
       - ./backup:/backup
       # Frigate's config is generated from the device registry, not hand-written.
       - ./data/frigate:/frigate
+      - ./data/media/uploads:/media/uploads
     depends_on:
       ollama:
         condition: service_started

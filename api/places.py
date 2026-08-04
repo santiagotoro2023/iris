@@ -40,6 +40,11 @@ settings.setting(
     title="Work", order=2,
     description="The other end of the commute.")
 settings.setting(
+    "location.auto", type="boolean", default=True,
+    title="Follow my location", order=4,
+    description="Ask the browser where you are when the page opens and before each "
+                "message, so transit and weather use where you actually are.")
+settings.setting(
     "location.latitude", type="number", minimum=-90, maximum=90, default=0.0,
     title="Latitude", order=85,
     description="Filled in by 'use my location' above.")
@@ -355,6 +360,25 @@ async def set_location(body: Position, user: dict = Depends(auth.active_user)):
         patch["location.home"] = name
     await settings.apply(patch, actor=user["username"])
     return {"place": name or "unknown", **patch}
+
+
+async def whereabouts() -> str:
+    coords = _fixed_coordinates()
+    if not coords:
+        home = settings.get("location.home")
+        return (f"No location fix. Home is set to {home!r}." if home else
+                "No location fix, and Home is not set. Press 'use my location' in "
+                "Settings, or name a place.")
+    lat, lon = coords
+    name = await _place_name(lat, lon)
+    stop = await nearest_stop()
+    lines = [f"Location: {name or 'unknown'} ({lat}, {lon})."]
+    if stop:
+        lines.append(f"Nearest public transport stop: {stop}.")
+    home, work = settings.get("location.home"), settings.get("location.work")
+    if home:
+        lines.append(f"Home is {home}." + (f" Work is {work}." if work else ""))
+    return "\n".join(lines)
 
 
 @router.get("/departures")

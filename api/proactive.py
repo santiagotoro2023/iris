@@ -28,9 +28,11 @@ router = APIRouter(prefix="/proactive", tags=["proactive"])
 HOURS = [f"{h:02d}:00" for h in range(24)]
 
 settings.setting(
-    "proactive.enabled", type="boolean", default=False,
+    "proactive.enabled", type="boolean", default=True,
     title="Speak first", order=1,
-    description="Let IRiS start a conversation, rather than only answering.")
+    description="Let IRiS start a conversation, rather than only answering. The daily "
+                "briefing is written whether or not you have the page open, so it is "
+                "waiting when you get up.")
 settings.setting(
     "proactive.briefing_at", type="string", enum=HOURS, default="07:00",
     title="Daily briefing at", order=2,

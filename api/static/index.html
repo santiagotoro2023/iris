@@ -62,7 +62,7 @@
       <div class="composer-note" id="composer-note" hidden></div>
       <div class="composer">
         <input type="file" id="file-input" hidden
-               accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
+               accept="image/*,video/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
         <button class="mic" id="attach" type="button" aria-label="Attach a file"
                 title="Attach an image or document">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
@@ -118,29 +118,29 @@
   <section class="view" id="view-memory" role="tabpanel">
     <div class="panel">
       <h2>What IRiS remembers</h2>
-      <div class="mem-add">
-        <input class="input" id="mem-search" type="text" placeholder="Search memories…"
-               aria-label="Search memories">
+      <div class="panel-bar">
+        <input class="input grow" id="mem-search" type="text"
+               placeholder="Search memories…" aria-label="Search memories">
       </div>
-      <div class="mem-add">
-        <input class="input" id="mem-new" type="text" placeholder="Teach it something…"
-               aria-label="New memory">
+      <div class="panel-bar">
+        <input class="input grow" id="mem-new" type="text"
+               placeholder="Teach it something…" aria-label="New memory">
         <button class="btn" id="mem-save" type="button">Remember</button>
       </div>
-      <div class="mem-add">
+      <div class="panel-bar">
         <input type="file" id="ingest-input" hidden accept="audio/*,video/*">
-        <span class="desc" id="ingest-note" style="flex:1;margin:0">Transcribe a
-          recording into searchable memory.</span>
-        <button class="ghost" id="ingest" type="button">ingest a recording</button>
+        <button class="btn" id="ingest" type="button">Ingest a recording</button>
+        <span class="desc" id="ingest-note">Transcribe a recording or video into
+          searchable memory.</span>
       </div>
       <div id="mem-list"><div class="empty">loading…</div></div>
     </div>
 
     <div class="panel" style="margin-top:1.1rem">
       <h2>Backups</h2>
-      <div class="mem-add">
-        <span class="desc" id="backup-note" style="flex:1;margin:0">…</span>
-        <button class="ghost" id="backup-now" type="button">back up now</button>
+      <div class="panel-bar">
+        <button class="btn" id="backup-now" type="button">Back up now</button>
+        <span class="desc" id="backup-note">…</span>
       </div>
       <div id="backup-list"><div class="empty">loading…</div></div>
     </div>
@@ -149,9 +149,9 @@
   <section class="view" id="view-devices" role="tabpanel">
     <div class="panel">
       <h2>Devices</h2>
-      <div class="thing-add">
+      <div class="panel-bar">
         <button class="btn" data-add="device" type="button">Add a device</button>
-        <span class="desc" style="margin:0">Cameras, microphones, and whatever comes next.</span>
+        <span class="desc">Cameras, microphones, and whatever comes next.</span>
       </div>
       <div id="device-form"></div>
       <div id="device-list"><div class="empty">loading…</div></div>
@@ -161,9 +161,9 @@
   <section class="view" id="view-integrations" role="tabpanel">
     <div class="panel">
       <h2>Integrations</h2>
-      <div class="thing-add">
+      <div class="panel-bar">
         <button class="btn" data-add="integration" type="button">Add an integration</button>
-        <span class="desc" style="margin:0">Credentials stay on this machine and are never sent back to the browser.</span>
+        <span class="desc">Credentials stay on this machine and are never sent back to the browser.</span>
       </div>
       <div id="integration-form"></div>
       <div id="integration-list"><div class="empty">loading…</div></div>
@@ -186,7 +186,7 @@
         <input class="input" id="pw-again" type="password" autocomplete="new-password">
         <div class="thing-actions" style="margin-top:.7rem">
           <button class="btn" id="pw-save" type="button">Set password</button>
-          <button class="ghost" id="pw-cancel" type="button">cancel</button>
+          <button class="btn secondary" id="pw-cancel" type="button">Cancel</button>
           <div class="status" id="pw-status"></div>
         </div>
       </div>
@@ -848,6 +848,11 @@ async function sendMessage() {
   box.value = "";
   box.style.height = "auto";
 
+  // A fix taken now, so "the next bus" starts from here rather than from wherever
+  // the page was opened. Bounded, so a slow or refused fix never blocks a message.
+  await Promise.race([refreshLocation(),
+                      new Promise(r => setTimeout(r, 2500))]);
+
   const log = $("#chat-log");
   const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   log.append(bubble("user", text, sending, COMMAND?.name));
@@ -941,6 +946,29 @@ async function sendMessage() {
     $("#send").disabled = false;
     box.focus();
   }
+}
+
+/* ------------------------------------------------------------- location -- */
+/* The server cannot ask the browser where it is, so the browser volunteers: on load
+   and before a message, throttled. Without this the stored fix is wherever you were
+   when you last pressed the button, which is the wrong answer for "the next bus". */
+const LOCATION_MAX_AGE_MS = 120000;
+let lastFix = 0;
+
+function refreshLocation({force = false} = {}) {
+  if (!VALUES["location.auto"] || !navigator.geolocation) return Promise.resolve();
+  if (!force && Date.now() - lastFix < LOCATION_MAX_AGE_MS) return Promise.resolve();
+  return new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(async pos => {
+      lastFix = Date.now();
+      try {
+        await send("places/location", {latitude: pos.coords.latitude,
+                                       longitude: pos.coords.longitude}, "POST");
+      } catch { /* a stale fix beats no reply */ }
+      resolve();
+    }, () => resolve(),
+       {enableHighAccuracy: true, timeout: 8000, maximumAge: 60000});
+  });
 }
 
 /* --------------------------------------------------------- quick commands -- */
@@ -1410,7 +1438,7 @@ function buildForm(kind, spec, existing) {
       save.disabled = false;
     }
   });
-  const cancel = el("button", "ghost", "cancel");
+  const cancel = el("button", "btn secondary", "Cancel");
   cancel.type = "button";
   cancel.addEventListener("click", () => box.remove());
 
@@ -1439,11 +1467,13 @@ async function showTypePicker(kind) {
     grid.append(card);
   }
   box.append(grid);
-  const cancel = el("button", "ghost", "cancel");
+  const cancel = el("button", "btn secondary", "Cancel");
   cancel.type = "button";
-  cancel.style.marginTop = ".7rem";
+  const bar = el("div", "thing-actions");
+  bar.style.marginTop = ".8rem";
   cancel.addEventListener("click", () => { host.textContent = ""; });
-  box.append(cancel);
+  bar.append(cancel);
+  box.append(bar);
   host.append(box);
 }
 
@@ -1611,12 +1641,15 @@ async function loadBackups() {
     list.append(el("div", "empty", "No backups yet."));
     return;
   }
+  const head = el("div", "backup-row backup-head");
+  head.append(el("span", "name", "archive"), el("span", "when", "taken"),
+              el("span", "size", "size"), el("span", null, ""));
+  list.append(head);
   for (const b of data.backups) {
-    const row = el("div", "mem-row");
-    row.append(el("div", "mem-text", b.name));
-    const meta = el("div", "mem-meta");
-    meta.append(el("span", null, new Date(b.created * 1000).toLocaleString()));
-    meta.append(el("span", "mem-kind", bytes(b.bytes)));
+    const row = el("div", "backup-row");
+    row.append(el("span", "name", b.name));
+    row.append(el("span", "when", new Date(b.created * 1000).toLocaleString()));
+    row.append(el("span", "size", bytes(b.bytes)));
     const del = el("button", "ghost", "delete");
     del.type = "button";
     del.addEventListener("click", async () => {
@@ -1624,8 +1657,7 @@ async function loadBackups() {
       await json("backup/" + encodeURIComponent(b.name), {method: "DELETE"});
       loadBackups();
     });
-    meta.append(del);
-    row.append(meta);
+    row.append(del);
     list.append(row);
   }
 }
@@ -1793,6 +1825,7 @@ function listen() {
   listen();
   syncHandsFree();
   json("commands").then(d => { COMMANDS = d.commands; }).catch(() => {});
+  refreshLocation({force: true});
   $("#composer").focus();
 })();
 </script>

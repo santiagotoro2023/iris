@@ -16,7 +16,7 @@ VISION_DEFAULT="qwen2.5vl:3b"
 EMBED_DEFAULT="bge-m3"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
-           data/searxng data/media data/media/frigate data/wakewords
+           data/searxng data/media data/media/frigate data/media/uploads data/wakewords
            data/frigate
            data/mosquitto/data data/mosquitto/log)
 

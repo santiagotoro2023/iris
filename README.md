@@ -191,8 +191,11 @@ departure board, a place search and the weather — so "when's the next train to
 Zurich?", "where's the nearest pharmacy?" and "do I need a coat?" are answered from
 live data rather than from a web search.
 
-Press **use my location** next to Home in Settings and the browser hands over a
-position. After that:
+**Follow my location** is on by default: the browser volunteers a position when the
+page opens and before each message, so what IRiS knows is where you are now rather
+than where you were when you last pressed a button. The fix is taken with GPS
+accuracy requested, because a coarse network position put the nearest stop in the
+wrong part of a village. After that:
 
 - *"what's the weather"* uses where you are, not a town name and certainly not the
   middle of the country.
@@ -211,8 +214,8 @@ HTTPS.
 
 ## Speaking first
 
-IRiS can start a conversation rather than only answering. **Speak first** is off by
-default, because it should be your decision that it may interrupt you.
+IRiS can start a conversation rather than only answering, which **Speak first**
+controls.
 
 The daily briefing is built the sober way round: the facts are gathered by calling
 the tools directly, and only the *wording* is left to the model. Asking an 8B model
@@ -225,6 +228,10 @@ It covers, in order: the weather where you are, the commute, your calendar, your
 and a few headlines from the world and your region. The headlines come from a live
 news search and **the sources are attached to the briefing** as an ordinary collapsed
 source list, with links, exactly as a web search in chat looks.
+
+The briefing is written by the server, not the browser, so it does not matter whether
+the page is open: get up at half seven and the seven o'clock briefing is already
+waiting in Conversations.
 
 **Quiet hours** wrap midnight properly, so 22:00 to 07:00 means what it says. A
 briefing due inside them waits. If the machine was off at briefing time, the day is

@@ -288,6 +288,67 @@ async def _find_place(query: str, near: str = ""):
     return await places.find_place(query, near)
 
 
+def _file_arg(name: str) -> str:
+    return {"type": "object",
+            "properties": {
+                "file": {"type": "string",
+                         "description": "The uploaded file's name. Omit to use the "
+                                        "most recent upload."},
+                "question": {"type": "string",
+                             "description": "What to look for. Omit for a general "
+                                            "description."}}}
+
+
+@tool("analyze_image",
+      "Look at an uploaded picture again and answer a specific question about it. "
+      "The description from the upload is already in the conversation; use this when "
+      "a new question needs a fresh look.",
+      _file_arg("image"),
+      activity="Looking at {file}", display="text")
+async def _analyze_image(file: str = "", question: str = ""):
+    import files
+    return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
+
+
+@tool("analyze_document",
+      "Read an uploaded document again and answer a specific question about it.",
+      _file_arg("document"),
+      activity="Reading {file}", display="text")
+async def _analyze_document(file: str = "", question: str = ""):
+    import files
+    return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
+
+
+@tool("analyze_video",
+      "Watch an uploaded video and answer questions about it. Frames are sampled "
+      "across its whole length and any speech is transcribed.",
+      _file_arg("video"),
+      activity="Watching {file}", display="text")
+async def _analyze_video(file: str = "", question: str = ""):
+    import files
+    return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
+
+
+@tool("list_uploads",
+      "List the files that have been uploaded and can still be looked at.",
+      {"type": "object", "properties": {}},
+      activity="Checking what has been uploaded", display="lines")
+async def _list_uploads():
+    import files
+    names = files.recent(20)
+    return "\n".join(f"- {n}" for n in names) or "Nothing has been uploaded."
+
+
+@tool("where_am_i",
+      "Where the user currently is, and the nearest public transport stop to them. "
+      "Use this whenever a question depends on their location.",
+      {"type": "object", "properties": {}},
+      activity="Working out where you are", display="lines")
+async def _where_am_i():
+    import places
+    return await places.whereabouts()
+
+
 @tool("system_status",
       "Measure what this machine is actually doing right now: GPU load and "
       "temperature, which models are resident in VRAM, CPU load, memory, disk, "

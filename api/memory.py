@@ -251,8 +251,11 @@ async def ingest(audio: UploadFile = File(...),
     data = await audio.read()
     if not data:
         raise HTTPException(400, "empty audio")
-    if len(data) > voice.MAX_AUDIO_BYTES:
-        raise HTTPException(413, "recording too large")
+    limit = 500 * 1024 * 1024
+    if len(data) > limit:
+        raise HTTPException(413, f"that recording is "
+                                 f"{len(data) // 2**20} MB; the limit is "
+                                 f"{limit // 2**20} MB")
     result = await voice.transcribe_bytes(data, audio.filename or "recording.webm",
                                           audio.content_type or "audio/webm")
     text = (result.get("text") or "").strip()
