@@ -148,6 +148,12 @@ paths use them:
   search means it mostly does not.
 - **A `remember` tool**, so IRiS can deliberately store something it just learned,
   and a `recall` tool for digging out an older detail.
+- **Learning from conversations.** After each exchange a second, tool-free pass picks
+  out anything durable and stores it. Extracted lines must be *grounded*: a fact
+  whose distinctive words never appear in what was actually said is thrown away,
+  because an 8B model pads its list no matter how the prompt is worded. Asked about a
+  move to Winterthur it also volunteered "they are adjusting to a new daily routine",
+  which nobody said.
 
 A near-identical fact replaces the existing one rather than piling up copies. The
 **Memory** tab lists everything remembered, searches it, and lets you add or forget

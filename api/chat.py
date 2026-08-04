@@ -3,6 +3,7 @@
 State lives in Redis rather than the browser so Phase 5 can hand a conversation
 from phone to desktop mid-sentence (SPEC.md Phase 5).
 """
+import asyncio
 import json
 import time
 import uuid
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 
 import activity
 import auth
+import memory
 import reasoning
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -125,6 +127,9 @@ async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
                 f"{len(body.content)} chars, streamed"
                 + (f", tools: {', '.join(used)}" if used else ""),
                 user["username"])
+            # Detached: learning from the exchange is a second model call, and the
+            # user is already reading the reply. It must never delay or break it.
+            asyncio.create_task(memory.capture(final["messages"][-2:], uid))
 
     return StreamingResponse(events(), media_type="application/x-ndjson",
                              headers={"cache-control": "no-cache",

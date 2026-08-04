@@ -11,6 +11,7 @@ them, and the second is what actually makes memory work:
 Qdrant speaks plain HTTP and httpx is already here, so there is no client library.
 """
 import os
+import re
 import time
 import uuid
 
@@ -70,6 +71,12 @@ settings.setting(
                 "Measured with bge-m3 on full-sentence questions: genuine matches "
                 "score down to 0.43 and unrelated ones up to 0.37. The bands are "
                 "close, so this is worth tuning by eye once there are real memories.")
+settings.setting(
+    "memory.auto_capture", type="boolean", default=True,
+    title="Learn from conversations",
+    description="After each exchange, quietly pick out anything durable worth keeping "
+                "and remember it. Without this, memory only fills when IRiS thinks to "
+                "store something, which it often does not.")
 settings.setting(
     "memory.dedup_score", type="number", minimum=0.8, maximum=1.0, default=0.93,
     title="Duplicate threshold",
@@ -236,3 +243,97 @@ async def delete(point_id: str, user: dict = Depends(auth.active_user)):
     await forget(point_id)
     await activity.record("memory.forget", point_id, user["username"])
     return {"ok": True}
+
+
+# --------------------------------------------------------------- capture ----
+
+CAPTURE_SYSTEM = """You extract durable facts for a personal assistant's long-term \
+memory. You are not talking to anyone; you only produce a list.
+
+Output ONE fact per line, each a standalone sentence that will still make sense in six \
+months without the surrounding conversation. Write them in the third person about the \
+user. At most 3 lines. No numbering, no bullets, no commentary.
+
+STORE ONLY: stable preferences, personal or biographical details, their hardware or \
+software setup, decisions they have made, projects they are working on, people and \
+places that recur in their life.
+
+NEVER STORE: questions they asked, facts you looked up for them, general knowledge, \
+anything about yourself, or passing conversational filler.
+
+Record only what was actually said. Do not infer, generalise or embellish: "they are \
+adjusting to a new routine" is not a fact if nobody said it. Prefer one solid line to \
+three padded ones.
+
+If nothing in the exchange is durable, reply with exactly: NONE"""
+
+MIN_CAPTURE_CHARS = 40
+
+
+async def _complete(system: str, user: str) -> str:
+    """A plain, tool-free, persona-free completion. Extraction is a different job
+    from being IRiS, and giving it the persona made it answer in character."""
+    async with httpx.AsyncClient(timeout=180) as c:
+        r = await c.post(f"{OLLAMA_URL}/api/chat", json={
+            "model": settings.get("llm.model"),
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "stream": False, "think": False,
+            "options": {"temperature": 0}})
+    if r.status_code != 200:
+        raise RuntimeError(f"ollama: {r.text[:200]}")
+    return (r.json().get("message") or {}).get("content", "")
+
+
+# Words that carry no evidence either way, so their presence must not vouch for a
+# sentence and their absence must not condemn it.
+_FILLER = {"user", "they", "their", "them", "then", "there", "that", "this", "with",
+           "have", "been", "will", "would", "about", "into", "from", "when", "what",
+           "which", "these", "those", "also", "just", "very", "some", "more", "than",
+           "does", "prefers", "wants", "uses", "said", "says", "always", "never"}
+
+
+def _grounded(fact: str, source: str) -> bool:
+    """Reject facts the conversation does not support.
+
+    An 8B model pads a list no matter how the prompt is worded: asked about a move
+    to Winterthur it also produced "they are adjusting to a new daily routine",
+    which nobody said. Arguing with the prompt did not fix it; requiring the
+    distinctive words to actually appear does, and it cannot be talked out of.
+    """
+    words = {w for w in re.findall(r"[a-z]{4,}", fact.lower()) if w not in _FILLER}
+    if not words:
+        return False
+    have = set(re.findall(r"[a-z]{4,}", source.lower()))
+    return sum(w in have for w in words) / len(words) >= 0.5
+
+
+def _usable(line: str) -> bool:
+    line = line.strip(" -*\u2022\t")
+    if len(line) < 12 or line.upper().startswith("NONE"):
+        return False
+    # An 8B model reliably narrates ("Here are the facts:") no matter what it is told.
+    return not line.rstrip().endswith(":")
+
+
+async def capture(exchange: list[dict], user_id: int) -> list[str]:
+    """Learn from one user/assistant exchange. Never raises: this runs detached from
+    the reply and a failure here must not surface as a broken conversation."""
+    try:
+        if not settings.get("memory.enabled") or not settings.get("memory.auto_capture"):
+            return []
+        text = "\n".join(f"{m['role']}: {m.get('content') or ''}"
+                          for m in exchange if m.get("role") in ("user", "assistant"))
+        if len(text) < MIN_CAPTURE_CHARS:
+            return []
+        reply = await _complete(CAPTURE_SYSTEM, text[:6000])
+        facts = [ln.strip(" -*\u2022\t") for ln in reply.splitlines() if _usable(ln)]
+        facts = [f for f in facts if _grounded(f, text)][:3]
+        stored = []
+        for fact in facts:
+            await remember(fact, user_id, source="learned")
+            stored.append(fact)
+        return stored
+    except Exception as e:
+        print(f"[memory] capture failed: {e}", flush=True)
+        return []

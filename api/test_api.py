@@ -318,6 +318,20 @@ async def _none():
     return ""
 
 
+def test_invented_facts_are_rejected():
+    """An 8B extractor pads its list no matter how the prompt is worded. Asked about
+    a move to Winterthur it also produced "they are adjusting to a new daily
+    routine", which nobody said. Prompting did not fix it; grounding does."""
+    said = ("user: I've just moved from Zurich to Winterthur, so my commute is "
+            "different now.\nassistant: Winterthur to the office is a different line.")
+    assert memory._grounded("The user has moved from Zurich to Winterthur.", said)
+    assert memory._grounded("Their commute to the office is now different.", said)
+    assert not memory._grounded("They are adjusting to a new daily routine.", said)
+    assert not memory._grounded("The user enjoys skiing in the Alps.", said)
+    # Filler alone must never vouch for a sentence.
+    assert not memory._grounded("They have been there.", said)
+
+
 def test_backup_delete_cannot_escape_the_backup_directory():
     """The filename comes from the client, so a crafted one must not walk out."""
     import asyncio

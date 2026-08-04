@@ -1144,7 +1144,27 @@ collection deleted, restored from inside the encrypted archive, three memories b
 reduced to its basename and must match the archive prefix and suffix; a test asserts
 that `../../etc/passwd` and friends cannot escape.
 
+## 27. Learning From Conversations
+
+Memory that only fills when the model remembers to call `remember` mostly stays
+empty, so every completed exchange now gets a second, tool-free and persona-free
+extraction pass. It is fired detached from the reply: the user is already reading,
+and a failure there must never surface as a broken conversation.
+
+**Grounding is the interesting part.** The extractor pads its list regardless of the
+prompt. Asked about a move from Zurich to Winterthur it returned three lines, the
+third being "They are adjusting to a new daily routine" — which nobody said.
+Tightening the prompt with "do not infer, generalise or embellish" did not remove it;
+it reproduced verbatim on the next run. What does remove it is a deterministic check:
+take the distinctive words of the candidate fact, drop filler, and require at least
+half of them to actually appear in the exchange. It cannot be talked out of, it costs
+nothing, and it has a test.
+
+Measured after the change: the move produces the two real facts and not the invented
+one, "always give me answers in metric" produces the preference, and a pure lookup
+("What is the capital of Australia?") produces nothing at all.
+
 ### Still open in Phase 3
 
-Raw conversation ingestion, diarization, and the nightly compaction enforcing the
+Audio ingestion and diarization (pyannote), and the nightly compaction enforcing the
 30-day rolling raw retention.
