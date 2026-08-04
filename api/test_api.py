@@ -3,6 +3,7 @@
 Run: python -m pytest test_api.py   (or just: python test_api.py)
 """
 import json
+import re
 from unittest.mock import patch
 
 from fastapi import Depends
@@ -79,8 +80,10 @@ def test_tool_call_executes_and_loop_terminates():
     tool_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_msgs) == 1, msgs
     assert tool_msgs[0]["tool_name"] == "current_time"
-    # current_time returns an ISO timestamp, not an error string
-    assert tool_msgs[0]["content"].startswith("20"), tool_msgs[0]
+    # A spoken clock reading, not an error string and not ISO: read back from ISO
+    # the model announced the wrong time of day (SPEC.md 20).
+    assert re.match(r"^\d\d:\d\d on \w+, \d\d \w+ \d{4} ",
+                    tool_msgs[0]["content"]), tool_msgs[0]
 
 
 def test_unknown_tool_reports_back_instead_of_crashing():
@@ -144,6 +147,116 @@ def test_emoji_is_stripped_but_text_is_not():
     # Everything that merely looks exotic must survive: bullets, arrows, accents.
     keep = "\u2022 caf\u00e9 \u2192 na\u00efve \u2014 51\u2013200 \u00a9"
     assert reasoning.strip_emoji(keep) == keep
+
+
+class FakeOww:
+    """Fires once, on the frame the test asks for."""
+    def __init__(self):
+        self.score, self.resets = 0.0, 0
+
+    def predict(self, frame):
+        return {"test_v0.1": self.score}
+
+    def reset(self):
+        self.resets += 1
+
+
+class FakeVad:
+    def __init__(self):
+        self.speech = 0.0
+
+    def predict(self, chunk):
+        return self.speech
+
+
+def _turn():
+    import wake
+    return wake._Turn(FakeOww(), FakeVad()), __import__("numpy").zeros(1280, dtype="int16")
+
+
+def test_wake_then_silence_ends_the_turn():
+    """The whole point of turn-taking: wake, hear speech, stop when it stops."""
+    import wake
+    t, frame = _turn()
+    assert t.feed(frame) is None                      # asleep, nothing said
+
+    t.oww.score = 0.9
+    assert t.feed(frame) == "wake"
+    t.oww.score = 0.0
+
+    t.vad.speech = 0.9
+    assert t.feed(frame) == "listening"
+    for _ in range(3):
+        assert t.feed(frame) is None                  # still talking
+
+    t.vad.speech = 0.0
+    events = [t.feed(frame) for _ in range(20)]
+    assert "done" in events, events
+    # The captured audio is the utterance, not the silence that followed it.
+    assert len(t.pcm) > 0
+
+
+def test_wake_without_speech_goes_back_to_sleep():
+    t, frame = _turn()
+    t.oww.score = 0.9
+    assert t.feed(frame) == "wake"
+    t.oww.score = 0.0
+    events = [t.feed(frame) for _ in range(200)]       # 16 s of nothing
+    assert "idle" in events, events
+    assert t.state == "sleeping"
+
+
+def test_iris_speaking_cannot_wake_itself():
+    """The wake word is not watched for while IRiS talks, so its own voice in the
+    microphone cannot trigger it."""
+    t, frame = _turn()
+    t.speaking = True
+    t.oww.score = 0.99
+    assert all(t.feed(frame) != "wake" for _ in range(10))
+    assert t.state == "sleeping"
+
+
+def test_barge_in_needs_sustained_speech_and_keeps_the_preroll():
+    import wake
+    t, frame = _turn()
+    t.speaking = True
+    t.vad.speech = 0.9
+    events = [t.feed(frame) for _ in range(10)]
+    assert "barge_in" in events, events
+    # One frame must not be enough, or a cough interrupts IRiS.
+    assert events.index("barge_in") >= int(wake.BARGE_SECONDS / wake.FRAME_SECONDS) - 1
+    # What was said before the interruption was noticed is still captured.
+    assert len(t.pcm) > wake.FRAME * 2
+
+
+def test_barge_in_respects_the_setting():
+    t, frame = _turn()
+    t.speaking = True
+    t.vad.speech = 0.9
+    with patch.dict(settings._overrides, {"voice.barge_in": False}):
+        assert all(t.feed(frame) != "barge_in" for _ in range(20))
+
+
+def test_vad_carries_the_remainder_between_frames():
+    """80 ms frames are not a whole number of Silero's 30 ms ones; dropping the
+    remainder would quietly lose a third of the audio the endpointer sees."""
+    import numpy as np
+    import wake
+    t, frame = _turn()
+    seen = []
+    t.vad.predict = lambda chunk: seen.append(len(chunk)) or 0.0
+    for _ in range(4):
+        t._voice_score(frame)
+    assert all(n % wake.VAD_FRAME == 0 for n in seen), seen
+    assert sum(seen) >= wake.FRAME * 3            # nothing thrown away
+
+
+def test_wake_models_never_returns_an_empty_dropdown():
+    """An empty enum would make the stored setting fail validation on the next save."""
+    import wake
+    with patch.object(wake, "_bundled", lambda: {}), \
+         patch.object(wake, "CUSTOM_DIR", "/nonexistent"):
+        assert wake._wake_models()
 
 
 def test_web_search_tool_is_registered():
@@ -320,9 +433,14 @@ def test_initialisms_are_spelled_but_words_are_not():
 
 
 def test_spoken_text_always_ends_with_a_pause():
-    """XTTS clips the tail of an utterance without trailing room."""
-    assert voice.speech_text("No trailing punctuation here").endswith("…")
-    assert voice.speech_text("Already punctuated!").endswith("…")
+    """Every utterance ends on a stop. The extra ellipsis is XTTS-only: XTTS clips
+    the tail without trailing room, and it made Piper trail off into a mumble."""
+    with patch.dict(settings._overrides, {"voice.engine": "piper"}):
+        assert voice.speech_text("No trailing punctuation here") \
+            == "No trailing punctuation here."
+    with patch.dict(settings._overrides, {"voice.engine": "xtts"}):
+        assert voice.speech_text("No trailing punctuation here").endswith("…")
+        assert voice.speech_text("Already punctuated!").endswith("…")
 
 
 def test_persona_is_sent_but_never_stored():

@@ -46,9 +46,13 @@ services:
       TTS_URL: http://tts:8002
       SEARXNG_URL: http://searxng:8080
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
+      IRIS_VISION_MODEL: ${IRIS_VISION_MODEL:-qwen2.5vl:3b}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-}
       IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-0}
+    volumes:
+      # Custom wake word models only. The bundled ones live in the image.
+      - ./data/wakewords:/wakewords
     depends_on:
       ollama:
         condition: service_started

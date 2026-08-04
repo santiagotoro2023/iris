@@ -247,15 +247,10 @@ async def speak(body: SpeakRequest, user: dict = Depends(auth.active_user)):
     return Response(content=r.content, media_type="audio/wav")
 
 
-@router.post("/transcribe")
-async def transcribe(audio: UploadFile = File(...),
-                     user: dict = Depends(auth.active_user)):
-    data = await audio.read()
-    if not data:
-        raise HTTPException(400, "empty audio")
-    if len(data) > MAX_AUDIO_BYTES:
-        raise HTTPException(413, "audio too large")
-
+async def transcribe_bytes(data: bytes, filename: str = "audio.webm",
+                           content_type: str = "audio/webm") -> dict:
+    """One transcription path for the mic button and the hands-free listener alike,
+    so the configured model, language and idle-unload apply identically to both."""
     form = {
         "model": settings.get("voice.stt_model"),
         "device": settings.get("voice.stt_device"),
@@ -268,14 +263,25 @@ async def transcribe(audio: UploadFile = File(...),
         # Model loads can take a while on first use or after a settings change.
         async with httpx.AsyncClient(timeout=300) as c:
             r = await c.post(f"{STT_URL}/transcribe", data=form,
-                             files={"audio": (audio.filename or "audio.webm", data,
-                                              audio.content_type or "audio/webm")})
+                             files={"audio": (filename, data, content_type)})
     except Exception as e:
         raise HTTPException(502, f"stt unreachable: {e}")
     if r.status_code != 200:
         raise HTTPException(502, f"stt: {r.text[:300]}")
+    return r.json()
 
-    result = r.json()
+
+@router.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...),
+                     user: dict = Depends(auth.active_user)):
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "empty audio")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(413, "audio too large")
+
+    result = await transcribe_bytes(data, audio.filename or "audio.webm",
+                                    audio.content_type or "audio/webm")
     await activity.record(
         "voice.transcribe",
         f"{result.get('duration', '?')}s audio, detected {result.get('language')}",

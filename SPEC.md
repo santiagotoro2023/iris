@@ -877,3 +877,92 @@ Resolved:
 - The observed failure ("I'm operational and ready to assist! ... While I don't experience
   emotions like humans do ... How can I make your day better?") is now a verbatim BAD
   example in the persona, since worked examples move this model where rules do not.
+
+## 23. Phase 2 Completion — Wake Word and Turn-Taking
+
+Closes the two items §6 left open for Phase 2: "wake-word listener, turn-taking
+orchestration (barge-in, silence detection)".
+
+**Where it runs.** The microphone belongs to the browser, so the browser is the
+microphone and nothing more: an `AudioWorklet` decimates to 16 kHz mono Int16 and
+ships 80 ms frames up `ws://…/voice/listen`. openWakeWord runs in the `api` service
+rather than `stt`, because the WebSocket has to terminate where the session cookie
+is understood, and splitting them would mean proxying every frame through a second
+hop for nothing. The socket is only an *ear*: it returns a transcript, which the
+page sends through the ordinary chat path. A spoken turn and a typed one are the
+same code, the same conversation and the same storage.
+
+**Turn-taking state machine** (`api/wake.py`, `_Turn`):
+`sleeping` → (wake word) → `waiting` → (speech starts) → `capturing` → (silence, or
+the length cap) → transcribe → `sleeping`. A refractory period plus `Model.reset()`
+stops the audio still sitting in openWakeWord's buffers from re-firing.
+
+**Barge-in.** While the page reports that IRiS is speaking, the wake word is
+deliberately *not* watched for, so IRiS saying its own name cannot wake it; only
+barge-in is armed. Sustained speech (0.32 s, not one frame, or a cough interrupts)
+stops playback and captures the interruption, including ~1 s of pre-roll so the
+first words are not clipped. It relies on the browser's `echoCancellation`, which is
+why it is a setting that can be turned off on loudspeakers.
+
+**Verified end to end** against the running stack, using our own Piper voice as the
+test speaker: unauthenticated socket refused (1008); two seconds of silence produce
+no events; "Hey Jarvis." fires `wake`; the following sentence produces
+`listening` → `thinking` → `transcript: "Stop talking for a moment, I have a
+question."`; and speech during playback produces `barge_in`.
+
+**Open, and Santiago's call: the wake word is not "IRiS".** §5 specifies
+"openWakeWord, trained on 'IRiS'". No pre-trained model for that phrase exists
+publicly — the official repo bundles six words and the 241-model Home Assistant
+community collection has no match. The listener is model-agnostic and any `.onnx`
+dropped into `./data/wakewords/` appears in the dropdown without a restart, so the
+remaining work is one training run: openWakeWord's pipeline needs
+piper-sample-generator plus several GB of negative-feature datasets and about an
+hour on the 3060 Ti. Default is `hey_jarvis` until that is done. **ASK USER** before
+spending the download and the GPU time.
+
+### Decisions and traps recorded
+
+- **openWakeWord 0.6.0 declares a hard `tflite-runtime` dependency with no Python
+  3.12 wheel.** A plain `pip install openwakeword` therefore back-tracks silently to
+  0.4.0, which has a different API (`wakeword_model_paths`, no `inference_framework`,
+  no `download_models`). Installed with `--no-deps` plus explicit dependencies;
+  `inference_framework="onnx"` must be passed because the default is `"tflite"`.
+- **`download_models(target_directory=…)` is a trap.** The bundled Silero VAD path is
+  computed at import time from site-packages, so redirecting the download breaks
+  `vad_threshold` with a missing-file error. The 18 MB of weights are baked into the
+  image instead, and the volume carries only custom models.
+- **`openwakeword.MODELS[name]["model_path"]` points at the `.tflite` copy**, which is
+  unusable here. Both formats are downloaded, so the ONNX sibling is resolved by
+  extension swap.
+- **The first five `predict()` calls always return 0.0** regardless of input
+  (`model.py` buffers before scoring). Harmless here, but it means a wake word cannot
+  fire in the first 400 ms of a connection.
+- **Silero VAD only accepts whole 30 ms frames** and 80 ms is not a multiple of 30 ms,
+  so the remainder is carried between calls rather than dropped; dropping it would
+  quietly hide a third of the audio from the endpointer.
+- **Auth on a WebSocket.** `auth._token_from` and `auth.current_user` are typed
+  `HTTPConnection` rather than `Request`, which is the shared base of both and is
+  what FastAPI fills on either scope, so the existing session gate works unchanged.
+  The handler translates `HTTPException` into a 1008 close, because Starlette's HTTP
+  exception handler cannot produce a valid response on a WebSocket scope. A browser
+  cannot set an `Authorization` header on a WebSocket, so this authenticates by
+  cookie; a session token is deliberately not accepted in the query string.
+- **One switch, not two.** The composer button writes `voice.hands_free` and the live
+  settings feed drives the microphone, so the button and the Settings toggle cannot
+  disagree.
+- **One `Model` per connection.** ponytail: ~50 MB and half a second each, which is
+  right for a personal assistant; share and lock it if many clients ever listen at once.
+
+### Pre-existing defects fixed in passing
+
+- `setup.sh` pulled only the language model. `qwen2.5vl:3b`, which reads uploaded
+  images, was never pulled, so image analysis stalled on a silent 3 GB download at
+  first use. This was a live §3.4 violation; `pull_models` now pulls both, and
+  `IRIS_VISION_MODEL` is in `.env`, `.env.example` and compose.
+- The test suite was red. Two assertions described behaviour deliberately changed in
+  earlier commits: `current_time` no longer returns ISO (§20 changed it because the
+  model read an ISO timestamp back as the wrong time of day), and the trailing
+  ellipsis became XTTS-only (§21, it made Piper mumble). Both now assert the real
+  contract. 37 pass.
+- `README.md` documented a test command that could not work: `test_api.py` is not in
+  the image and the api service has no source mount. Corrected to mount the file.

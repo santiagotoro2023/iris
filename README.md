@@ -110,6 +110,20 @@ Synthesis runs ~3x faster than playback (1.45 s for ~5 s of speech), so after th
 first sentence the audio never stalls. Turn it on with *Speak replies aloud*, or play
 any single reply with the speaker button on it.
 
+**Hands-free.** Turn on *Hands-free listening* and the microphone stays open,
+waiting for a wake word. The browser streams 16 kHz mono audio to the API, where
+openWakeWord watches for the phrase and Silero VAD decides when your turn ended;
+the transcript is then sent as an ordinary message, so a spoken turn and a typed
+one land in the same conversation. Talking over IRiS stops it and captures what you
+said instead (*Interrupt while speaking*).
+
+> **The wake word is not "IRiS" yet.** No pre-trained openWakeWord model for that
+> phrase exists publicly, so the six bundled words ship as stand-ins and the default
+> is `hey_jarvis`. Training an "IRiS" model is a separate job; drop the resulting
+> `.onnx` into `./data/wakewords/` and it appears in the *Wake word* dropdown on its
+> own, no restart. Wake detection is deliberately suppressed while IRiS is speaking,
+> so it cannot wake itself, and barge-in leans on the browser's echo cancellation.
+
 Every control is drawn by the app — no native `<select>`, no number-spinner arrows,
 no browser validation bubbles. Forms carry `novalidate` and report errors inline.
 The pieces live in `api/static/app.js` (`Combo`, `Stepper`, `Toggle`) and are shared
@@ -188,4 +202,12 @@ just sessions, so its data has to survive a container recreate.
   **both** paths of `setup.sh` and this README in the same change.
 - Config files belong in the repo (e.g. `mosquitto/`); `./data/` is runtime state
   only and is gitignored.
-- API tests: `docker compose run --rm api sh -c "pip install -q pytest && python -m pytest test_api.py -q"`
+- API tests (the file is not in the image, so it is mounted in):
+  ```
+  docker compose run --rm --no-deps -v "$PWD/api/test_api.py:/app/test_api.py:ro" \
+    --entrypoint sh api -c "pip install -q pytest && python -m pytest test_api.py -q"
+  ```
+- openWakeWord 0.6.0 declares a hard `tflite-runtime` dependency with no Python 3.12
+  wheel, so a plain `pip install openwakeword` silently resolves back to 0.4.0 and a
+  different API. `api/Dockerfile` installs it with `--no-deps` and passes
+  `inference_framework="onnx"`; do not "fix" that back.

@@ -301,8 +301,14 @@ button { font: inherit; color: inherit; }
 .mic:disabled { opacity: .4; cursor: not-allowed; }
 .mic[aria-pressed="true"] { color: var(--orange); border-color: var(--orange); }
 .mic.busy { color: var(--cool); border-color: var(--cool); }
+/* Hands-free has a third state: armed and waiting is quiet, actually hearing you
+   is loud. Without the distinction there is no way to tell whether it caught the
+   wake word. */
+.mic.hearing { color: var(--orange); border-color: var(--orange);
+               box-shadow: 0 0 0 1px var(--orange), 0 0 14px -2px var(--orange); }
 @media (prefers-reduced-motion: no-preference) {
   .mic[aria-pressed="true"] { animation: pulse 1.3s ease-in-out infinite; }
+  .mic.hearing { animation: pulse .8s ease-in-out infinite; }
 }
 
 /* "processing" animation (SPEC.md 2) */

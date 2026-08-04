@@ -66,6 +66,15 @@
             <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
           </svg>
         </button>
+        <button class="mic" id="hands-free" type="button" aria-pressed="false"
+                aria-label="Hands-free listening" title="Hands-free listening">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M4 13v-1a8 8 0 0 1 16 0v1"/>
+            <path d="M4 13h2.4a1 1 0 0 1 1 1v3.6a1 1 0 0 1-1 1H5.6A1.6 1.6 0 0 1 4 17V13z"/>
+            <path d="M20 13h-2.4a1 1 0 0 0-1 1v3.6a1 1 0 0 0 1 1h.8A1.6 1.6 0 0 0 20 17V13z"/>
+          </svg>
+        </button>
         <textarea id="composer" rows="1" placeholder="Ask IRiS…"
                   aria-label="Message"></textarea>
         <button class="btn" id="send" type="button">Send</button>
@@ -232,6 +241,16 @@ const STOP_ICON =
   '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">' +
   '<rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>';
 
+/* The hands-free listener has to know when IRiS is talking: that is what stops it
+   waking itself and what arms barge-in. Idempotent, so every playback path can
+   call it freely. */
+let speakingNow = false;
+function setSpeaking(on) {
+  if (speakingNow === on) return;
+  speakingNow = on;
+  reportSpeaking(on);
+}
+
 function setPlayIcon(btn, playing) {
   if (!btn) return;
   btn.innerHTML = playing ? STOP_ICON : SPEAKER_ICON;
@@ -242,6 +261,7 @@ function setPlayIcon(btn, playing) {
 
 function stopSpeech() {
   playToken++;
+  setSpeaking(false);
   const p = currentPipeline;                  // automatic playback is a player too
   currentPipeline = null;
   p?.stop();
@@ -256,6 +276,7 @@ async function speakText(text, btn) {
   const token = ++playToken;
   currentBtn = btn;
   setPlayIcon(btn, true);
+  setSpeaking(true);
   try {
     const r = await api("voice/speak", {
       method: "POST", headers: {"content-type": "application/json"},
@@ -272,13 +293,14 @@ async function speakText(text, btn) {
     const done = () => {
       URL.revokeObjectURL(url);
       if (token === playToken) { currentAudio = null; setPlayIcon(btn, false);
-                                 currentBtn = null; }
+                                 currentBtn = null; setSpeaking(false); }
     };
     audio.onended = done;
     audio.onerror = done;
     await audio.play();
   } catch (e) {
-    if (token === playToken) { setPlayIcon(btn, false); currentBtn = null; }
+    if (token === playToken) { setPlayIcon(btn, false); currentBtn = null;
+                               setSpeaking(false); }
     if (btn) btn.title = "Speech failed: " + e.message;
   }
 }
@@ -510,12 +532,14 @@ function speechPipeline(btn) {
     currentPipeline = self;
     currentBtn = btn;
     setPlayIcon(btn, true);
+    setSpeaking(true);
   }
   function release() {
     if (currentPipeline !== self) return;
     currentPipeline = null;
     setPlayIcon(currentBtn, false);
     currentBtn = null;
+    setSpeaking(false);
   }
 
   async function drain() {
@@ -824,6 +848,148 @@ $("#mic").addEventListener("click", async () => {
   micState({recording: true, title: "Stop recording"});
 });
 
+/* ---------------------------------------------------------- hands-free -- */
+/* The wake word runs on the server, so this end is only a microphone: it ships
+   16 kHz mono Int16 frames up a WebSocket and reacts to what comes back. The
+   transcript is handed to the ordinary send path, so a spoken turn and a typed
+   one are the same conversation. */
+
+// AudioWorklet, not the deprecated ScriptProcessorNode. Loaded from a blob URL,
+// which inherits this document's origin — note that adding a CSP later would need
+// `script-src blob:` for this to keep working.
+const CAPTURE_WORKLET = `
+class Capture extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Int16Array(1280); this.n = 0;
+                  this.ratio = sampleRate / 16000; this.pos = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    // Decimate by averaging, so 48 kHz folds to 16 kHz without aliasing the
+    // wake word into noise. A plain sample-drop measurably hurt detection.
+    for (; this.pos < ch.length; this.pos += this.ratio) {
+      const i = this.pos | 0;
+      let sum = 0, k = 0;
+      for (let j = i; j < i + this.ratio && j < ch.length; j++) { sum += ch[j]; k++; }
+      const v = k ? sum / k : 0;
+      this.buf[this.n++] = Math.max(-1, Math.min(1, v)) * 32767;
+      if (this.n === this.buf.length) {
+        this.port.postMessage(this.buf.slice().buffer);
+        this.n = 0;
+      }
+    }
+    this.pos -= ch.length;
+    return true;
+  }
+}
+registerProcessor("capture", Capture);
+`;
+
+let hf = null;   // {ws, ctx, stream, node} while hands-free is running
+
+function hfState(state, title) {
+  const btn = $("#hands-free");
+  btn.setAttribute("aria-pressed", String(state !== "off"));
+  btn.classList.toggle("busy", state === "thinking");
+  btn.classList.toggle("hearing", state === "awake");
+  btn.title = title;
+  $("#mic").disabled = state !== "off";
+  if (state !== "off" && !$("#mic").title.includes("Hands-free"))
+    $("#mic").title = "Hands-free listening is on";
+}
+
+async function startHandsFree() {
+  if (hf) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    hfState("off", "Microphone needs https (or localhost)");
+    return;
+  }
+  let stream, ctx, node;
+  try {
+    // Echo cancellation is what stops IRiS's own voice from reaching the wake
+    // word detector and from tripping barge-in on every reply.
+    stream = await navigator.mediaDevices.getUserMedia({audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+    ctx = new AudioContext({sampleRate: 16000});
+    await ctx.audioWorklet.addModule(
+      URL.createObjectURL(new Blob([CAPTURE_WORKLET], {type: "application/javascript"})));
+    node = new AudioWorkletNode(ctx, "capture");
+  } catch (e) {
+    stream?.getTracks().forEach(t => t.stop());
+    await ctx?.close();
+    hfState("off", "Microphone unavailable: " + e.message);
+    return;
+  }
+
+  const ws = new WebSocket(
+    (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/voice/listen");
+  ws.binaryType = "arraybuffer";
+  hf = {ws, ctx, stream, node};
+
+  node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data); };
+  ctx.createMediaStreamSource(stream).connect(node);
+
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "ready") hfState("listening", `Listening for "${m.wake_word}"`);
+    else if (m.type === "wake") hfState("awake", "Go ahead");
+    else if (m.type === "listening") hfState("awake", "Listening");
+    else if (m.type === "idle") hfState("listening", "Listening for the wake word");
+    else if (m.type === "thinking") hfState("thinking", "Working out what you said");
+    else if (m.type === "barge_in") { stopSpeech(); hfState("awake", "Listening"); }
+    else if (m.type === "transcript") {
+      hfState("listening", "Listening for the wake word");
+      const box = $("#composer");
+      box.value = m.text;
+      sendMessage();
+    } else if (m.type === "error") {
+      $("#chat-log").append(bubble("tool", "hands-free: " + m.detail));
+      stopHandsFree();
+    }
+  };
+  ws.onclose = () => { if (hf) stopHandsFree(); };
+  ws.onerror = () => hfState("off", "Hands-free connection failed");
+}
+
+function stopHandsFree() {
+  if (!hf) return;
+  const {ws, ctx, stream, node} = hf;
+  hf = null;                      // before close(), so onclose does not recurse
+  node.port.onmessage = null;
+  node.disconnect();
+  stream.getTracks().forEach(t => t.stop());   // releases the microphone indicator
+  ctx.close();
+  if (ws.readyState <= 1) ws.close();
+  hfState("off", "Hands-free listening");
+}
+
+/* The server cannot hear IRiS's own playback, so the page has to say so —
+   that is what suppresses self-triggering and arms barge-in. */
+function reportSpeaking(value) {
+  if (hf?.ws.readyState === 1)
+    hf.ws.send(JSON.stringify({type: "speaking", value}));
+}
+
+/* The button and the Settings toggle are the same switch: the button writes
+   voice.hands_free and the live settings feed drives the microphone, so the two
+   controls can never disagree. */
+function syncHandsFree() {
+  if (VALUES["voice.hands_free"] && !hf) startHandsFree();
+  else if (!VALUES["voice.hands_free"] && hf) stopHandsFree();
+}
+
+$("#hands-free").addEventListener("click", async () => {
+  const want = !hf;
+  try {
+    VALUES = await send("settings/values", {"voice.hands_free": want}, "PUT");
+  } catch (e) {
+    hfState(hf ? "listening" : "off", "Could not save: " + e.message);
+    return;
+  }
+  syncHandsFree();
+});
+// Release the microphone when the page goes away, without turning the setting off.
+window.addEventListener("pagehide", stopHandsFree);
+
 async function loadConversations({selectLatest = false} = {}) {
   const convs = await json("chat/conversations");
   const list = $("#conv-list");
@@ -911,6 +1077,7 @@ function listen() {
       control.setValue?.(VALUES[key]);
     }
     refreshHud();
+    syncHandsFree();
   };
 }
 
@@ -928,6 +1095,7 @@ function listen() {
   refreshHud();
   loadConversations({selectLatest: true});
   listen();
+  syncHandsFree();
   $("#composer").focus();
 })();
 </script>

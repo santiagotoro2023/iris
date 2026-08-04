@@ -12,9 +12,10 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
+VISION_DEFAULT="qwen2.5vl:3b"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
-           data/searxng data/media
+           data/searxng data/media data/wakewords
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -135,6 +136,7 @@ ensure_env() {
   add_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
   add_env POSTGRES_DB iris
   add_env IRIS_MODEL "$MODEL_DEFAULT"
+  add_env IRIS_VISION_MODEL "$VISION_DEFAULT"
   add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
   add_env IRIS_THINK ""
 }
@@ -171,12 +173,16 @@ wait_for_voice() {
   warn "Voice services still downloading (speech=$stt voice=$tts). Text chat works meanwhile."
 }
 
-pull_model() {
-  local model
+# Both models IRiS reasons with: the language model and the vision model that reads
+# uploaded images. Pulled here so the first upload is not a silent 4 GB stall.
+pull_models() {
+  local model vision
   model="$(grep -E '^IRIS_MODEL=' .env | cut -d= -f2- || true)"
-  model="${model:-$MODEL_DEFAULT}"
-  log "Pulling model $model (~5 GB on first run, then cached)..."
-  dc exec -T ollama ollama pull "$model"
+  vision="$(grep -E '^IRIS_VISION_MODEL=' .env | cut -d= -f2- || true)"
+  log "Pulling ${model:-$MODEL_DEFAULT} (~5 GB) and ${vision:-$VISION_DEFAULT} (~3 GB)..."
+  dc exec -T ollama ollama pull "${model:-$MODEL_DEFAULT}"
+  dc exec -T ollama ollama pull "${vision:-$VISION_DEFAULT}" \
+    || warn "Vision model pull failed; image analysis will be unavailable until it succeeds."
 }
 
 install() {
@@ -189,7 +195,7 @@ install() {
   log "Building and starting services..."
   dc up -d --build
   wait_for_ollama
-  pull_model
+  pull_models
   wait_for_voice
   log "Done. IRiS is running."
   echo
@@ -208,7 +214,8 @@ uninstall() {
 
   if [ "${PURGE:-0}" != 1 ]; then
     log "Kept ./data and .env."
-    echo "  ./data holds all of IRiS's memory (Postgres, Qdrant, models, media)."
+    echo "  ./data holds all of IRiS's memory (Postgres, Qdrant, models, media)"
+    echo "  and any wake word models you trained, in ./data/wakewords."
     echo "  To remove those too:  ./setup.sh --uninstall --purge"
     return 0
   fi

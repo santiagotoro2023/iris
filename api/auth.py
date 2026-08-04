@@ -15,6 +15,7 @@ import psycopg
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from starlette.requests import HTTPConnection
 
 import activity
 import settings
@@ -130,17 +131,23 @@ async def _session_user(token: str) -> dict | None:
     return await _fetch_user("id = %s", int(user_id)) if user_id else None
 
 
-def _token_from(request: Request) -> str | None:
-    """Cookie for the web UI, bearer for the native app — one session store either way."""
-    token = request.cookies.get(COOKIE_NAME)
+def _token_from(conn: HTTPConnection) -> str | None:
+    """Cookie for the web UI, bearer for the native app — one session store either way.
+
+    Typed as HTTPConnection, not Request, so the same gate works on a WebSocket:
+    cookies and headers are defined on the shared base, and FastAPI fills an
+    HTTPConnection parameter on both scopes. A browser cannot set an Authorization
+    header on a WebSocket, so hands-free listening authenticates by cookie.
+    """
+    token = conn.cookies.get(COOKIE_NAME)
     if token:
         return token
-    header = request.headers.get("authorization", "")
+    header = conn.headers.get("authorization", "")
     return header[7:] if header.lower().startswith("bearer ") else None
 
 
-async def current_user(request: Request) -> dict:
-    token = _token_from(request)
+async def current_user(conn: HTTPConnection) -> dict:
+    token = _token_from(conn)
     user = await _session_user(token) if token else None
     if not user:
         raise HTTPException(401, "not authenticated")

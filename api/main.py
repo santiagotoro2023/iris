@@ -25,6 +25,7 @@ import persona
 import reasoning
 import settings
 import voice
+import wake
 
 OLLAMA_URL = reasoning.OLLAMA_URL
 _tags_cache: tuple[float, list[str]] = (0.0, [])
@@ -103,6 +104,9 @@ app.include_router(activity.router, dependencies=_gate)
 app.include_router(chat.router)   # its own routes depend on active_user individually
 app.include_router(voice.router)  # same
 app.include_router(files.router)  # same
+# Its own /voice prefix: a WebSocket cannot go on a router carrying a Request-typed
+# dependency, so the listener authenticates itself inside the handler.
+app.include_router(wake.router)
 
 
 class InferRequest(BaseModel):
