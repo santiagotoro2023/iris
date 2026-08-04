@@ -107,19 +107,32 @@ async def _test_webhook(thing: dict, user: dict | None = None) -> dict:
 
 
 registry.register(registry.Type(
-    kind="integration", name="mailbox", label="Mailbox (IMAP)",
-    description="Any IMAP mailbox: Outlook, Gmail with an app password, or your own "
-                "server. IRiS can tell you what has arrived.",
+    kind="integration", name="mailbox", label="Mailbox",
+    description="Tells you what has arrived. Works with Outlook, Gmail, iCloud or "
+                "your own server.",
+    preset_field="provider",
+    presets={
+        "Outlook / Microsoft 365": {"host": "outlook.office365.com", "port": 993,
+                                    "ssl": True},
+        "Gmail": {"host": "imap.gmail.com", "port": 993, "ssl": True},
+        "iCloud": {"host": "imap.mail.me.com", "port": 993, "ssl": True},
+        "Fastmail": {"host": "imap.fastmail.com", "port": 993, "ssl": True},
+        "Yahoo": {"host": "imap.mail.yahoo.com", "port": 993, "ssl": True},
+        "Other": {},
+    },
     fields=[
-        registry.Field("host", "IMAP server", required=True,
-                       help="outlook.office365.com, imap.gmail.com, mail.example.com"),
+        registry.Field("provider", "Provider", type="choice", required=True,
+                       default="Outlook / Microsoft 365",
+                       choices=["Outlook / Microsoft 365", "Gmail", "iCloud",
+                                "Fastmail", "Yahoo", "Other"],
+                       help="Fills in the server settings for you."),
+        registry.Field("username", "Email address", required=True),
+        registry.Field("password", "App password", type="password", required=True,
+                       secret=True,
+                       help="Create one in your account's security settings."),
+        registry.Field("host", "IMAP server", required=True),
         registry.Field("port", "Port", type="number", default=993),
         registry.Field("ssl", "Use SSL", type="boolean", default=True),
-        registry.Field("username", "Username", required=True),
-        registry.Field("password", "Password", type="password", required=True,
-                       secret=True,
-                       help="Use an app password. Gmail and Outlook both refuse a "
-                            "normal one over IMAP when 2FA is on."),
         registry.Field("folder", "Folder", default="INBOX"),
         registry.Field("unseen_only", "Unread only", type="boolean", default=True),
         registry.Field("limit", "Messages to fetch", type="number", default=10),
@@ -130,8 +143,7 @@ registry.register(registry.Type(
 
 registry.register(registry.Type(
     kind="integration", name="webhook", label="Webhook",
-    description="Somewhere for IRiS to POST when something happens. Useful for "
-                "wiring it into anything that accepts an HTTP callback.",
+    description="Sends what IRiS reports to any URL that accepts an HTTP callback.",
     fields=[
         registry.Field("url", "URL", type="password", required=True, secret=True,
                        help="A webhook URL usually is the credential, so it is "
@@ -235,16 +247,29 @@ async def _check_calendar(thing: dict, user: dict | None = None) -> dict:
 
 
 registry.register(registry.Type(
-    kind="integration", name="calendar", label="Calendar (CalDAV)",
-    description="Outlook, Google, Nextcloud or your own server, over CalDAV. Needs a "
-                "username and an app password, not an OAuth registration.",
+    kind="integration", name="calendar", label="Calendar",
+    description="Tells you what is on. Works with Nextcloud, Fastmail, iCloud or your "
+                "own server.",
+    preset_field="provider",
+    presets={
+        "Nextcloud": {"url": "https://YOUR-SERVER/remote.php/dav/calendars/"
+                             "USERNAME/personal/"},
+        "iCloud": {"url": "https://caldav.icloud.com/"},
+        "Fastmail": {"url": "https://caldav.fastmail.com/dav/calendars/user/"
+                            "USERNAME/Default/"},
+        "Other": {},
+    },
     fields=[
+        registry.Field("provider", "Provider", type="choice", required=True,
+                       default="Nextcloud",
+                       choices=["Nextcloud", "iCloud", "Fastmail", "Other"],
+                       help="Fills in the URL shape; replace the capitals with yours."),
         registry.Field("url", "Calendar URL", required=True,
-                       help="The collection URL, ending in a slash. Nextcloud: "
-                            "https://host/remote.php/dav/calendars/you/personal/"),
+                       help="Ends in a slash."),
         registry.Field("username", "Username", required=True),
-        registry.Field("password", "Password", type="password", required=True,
-                       secret=True, help="An app password, as with the mailbox."),
+        registry.Field("password", "App password", type="password", required=True,
+                       secret=True,
+                       help="Create one in your account's security settings."),
         registry.Field("days", "Days ahead", type="number", default=1),
     ],
     actions={"check": _check_calendar},
@@ -268,13 +293,12 @@ async def _send_push(thing: dict, user: dict | None = None,
 
 
 registry.register(registry.Type(
-    kind="integration", name="push", label="Push to phone (ntfy)",
-    description="Notifications on your phone without an account or an app store: "
-                "install ntfy, subscribe to a topic, and IRiS can reach you.",
+    kind="integration", name="push", label="Push to phone",
+    description="Notifications on your phone. Install the ntfy app, subscribe to a "
+                "topic, put the same topic here.",
     fields=[
         registry.Field("topic", "Topic", type="password", required=True, secret=True,
-                       help="Anyone who knows the topic on a public server can read "
-                            "it, so pick something unguessable."),
+                       help="Pick something long and unguessable, like a password."),
         registry.Field("server", "Server", default="https://ntfy.sh",
                        help="Change if you self-host ntfy."),
         registry.Field("priority", "Priority", type="number", default=3,

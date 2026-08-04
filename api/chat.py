@@ -41,8 +41,8 @@ class Send(BaseModel):
     content: str = Field(min_length=1)
     conversation_id: str | None = None
     think: bool | None = None
-    # A quick command selected in the composer. Steers the turn; never stored, so
-    # the transcript reads as what the user actually typed.
+    # A quick command selected in the composer. Steers the turn; the directive is
+    # never stored, so the transcript reads as what the user actually typed.
     command: str | None = None
     # [{name, kind, text}] from /files/analyze. Stored alongside the message so the
     # model still has the file on later turns, and the UI can show it collapsed.
@@ -51,6 +51,10 @@ class Send(BaseModel):
 
 def _user_message(body: "Send") -> dict:
     msg = {"role": "user", "content": body.content}
+    if body.command:
+        # Recorded, not applied: the transcript keeps what was typed, and the chat
+        # shows underneath it what context the message carried.
+        msg["command"] = body.command
     if body.attachments:
         msg["attachments"] = [
             {"name": a.get("name", "file"), "kind": a.get("kind", "text"),

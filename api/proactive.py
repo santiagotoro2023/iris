@@ -29,15 +29,12 @@ HOURS = [f"{h:02d}:00" for h in range(24)]
 
 settings.setting(
     "proactive.enabled", type="boolean", default=False,
-    title="Speak first",
-    description="Let IRiS start a conversation on its own, rather than only "
-                "answering. Off by default: it should be your decision that it may "
-                "interrupt you.")
+    title="Speak first", order=1,
+    description="Let IRiS start a conversation, rather than only answering.")
 settings.setting(
     "proactive.briefing_at", type="string", enum=HOURS, default="07:00",
-    title="Daily briefing at",
-    description="When to put the morning briefing in the chat. Skipped entirely if "
-                "the machine was off, rather than delivered at lunchtime.")
+    title="Daily briefing at", order=2,
+    description="When the briefing appears in the chat.")
 settings.setting(
     "proactive.quiet_from", type="string", enum=HOURS, default="22:00",
     title="Quiet hours start",

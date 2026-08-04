@@ -122,12 +122,26 @@ async def _snapshot_action(thing: dict, user: dict | None = None) -> dict:
 
 registry.register(registry.Type(
     kind="device", name="camera", label="Camera",
-    description="An RTSP or HTTP camera. IRiS can look at it and say what it sees.",
+    description="IRiS can look at it and say what it sees.",
+    preset_field="make",
+    presets={
+        "Hikvision": {"url": "rtsp://USER:PASSWORD@ADDRESS:554/Streaming/Channels/101"},
+        "Dahua": {"url": "rtsp://USER:PASSWORD@ADDRESS:554/cam/realmonitor"
+                         "?channel=1&subtype=0"},
+        "Reolink": {"url": "rtsp://USER:PASSWORD@ADDRESS:554/h264Preview_01_main"},
+        "UniFi Protect": {"url": "rtsps://ADDRESS:7441/STREAM-KEY?enableSrtp"},
+        "Amcrest": {"url": "rtsp://USER:PASSWORD@ADDRESS:554/cam/realmonitor"
+                           "?channel=1&subtype=0"},
+        "Other": {},
+    },
     fields=[
+        registry.Field("make", "Make", type="choice", required=True, default="Other",
+                       choices=["Hikvision", "Dahua", "Reolink", "UniFi Protect",
+                                "Amcrest", "Other"],
+                       help="Fills in the usual stream address for that make."),
         registry.Field("url", "Stream URL", type="password", required=True,
                        secret=True,
-                       help="rtsp://user:password@host:554/stream, or the "
-                            "http://host/snapshot.jpg endpoint many cameras expose."),
+                       help="Replace the capitals with yours."),
     ],
     actions={"describe": _describe_action, "snapshot": _snapshot_action},
     action_labels={"describe": "look", "snapshot": "snapshot"},

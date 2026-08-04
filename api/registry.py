@@ -63,11 +63,17 @@ class Type:
     # name -> coroutine(instance, user) -> dict. Rendered as buttons on the instance.
     actions: dict[str, Callable] = field(default_factory=dict)
     action_labels: dict[str, str] = field(default_factory=dict)
+    # A field whose value fills in the rest, so common cases need one choice rather
+    # than five lookups. {"Outlook": {"host": ..., "port": ...}, ...}
+    preset_field: str = ""
+    presets: dict[str, dict] = field(default_factory=dict)
 
     def as_json(self) -> dict:
         return {"type": self.name, "label": self.label,
                 "description": self.description,
                 "fields": [f.as_json() for f in self.fields],
+                "preset_field": self.preset_field,
+                "presets": self.presets,
                 "actions": [{"name": a, "label": self.action_labels.get(a, a)}
                             for a in self.actions]}
 

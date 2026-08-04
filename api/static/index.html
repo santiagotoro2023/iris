@@ -18,6 +18,14 @@
         <span class="user-name" id="user-name">&mdash;</span>
         <span class="user-role" id="user-role"></span>
       </span>
+      <button class="iconbtn" id="change-pw" type="button" title="Change password"
+              aria-label="Change password">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="10" width="16" height="10" rx="1.5"/>
+          <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+        </svg>
+      </button>
       <button class="iconbtn" id="logout" type="button" title="Sign out"
               aria-label="Sign out">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
@@ -50,7 +58,8 @@
     <div class="chat-main">
       <div class="chat-log" id="chat-log"></div>
       <div id="attach-bar"></div>
-      <div class="chip" id="quick-chip" hidden></div>
+      <div class="cmd-chip" id="quick-chip" hidden></div>
+      <div class="composer-note" id="composer-note" hidden></div>
       <div class="composer">
         <input type="file" id="file-input" hidden
                accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
@@ -162,6 +171,26 @@
   </section>
 
   <section class="view" id="view-settings" role="tabpanel">
+    <div class="panel" id="password-panel" hidden style="margin-bottom:1.1rem">
+      <h2>Change password</h2>
+      <div class="row">
+        <label for="pw-current">Current password</label>
+        <input class="input" id="pw-current" type="password" autocomplete="current-password">
+      </div>
+      <div class="row">
+        <label for="pw-new">New password</label>
+        <input class="input" id="pw-new" type="password" autocomplete="new-password">
+      </div>
+      <div class="row">
+        <label for="pw-again">Repeat it</label>
+        <input class="input" id="pw-again" type="password" autocomplete="new-password">
+        <div class="thing-actions" style="margin-top:.7rem">
+          <button class="btn" id="pw-save" type="button">Set password</button>
+          <button class="ghost" id="pw-cancel" type="button">cancel</button>
+          <div class="status" id="pw-status"></div>
+        </div>
+      </div>
+    </div>
     <div id="groups"></div>
   </section>
 
@@ -190,6 +219,14 @@ document.querySelectorAll(".tab").forEach(tab => {
     if (tab.dataset.view === "devices") loadThings("device");
     if (tab.dataset.view === "integrations") loadThings("integration");
   });
+});
+
+$("#change-pw").addEventListener("click", () => {
+  document.querySelector('.tab[data-view="settings"]').click();
+  const box = $("#password-panel");
+  box.hidden = false;
+  box.scrollIntoView({behavior: "smooth", block: "center"});
+  $("#pw-current").focus();
 });
 
 $("#logout").addEventListener("click", async () => {
@@ -258,13 +295,15 @@ function rowFor(key, spec) {
         return;
       }
       locate.disabled = true;
-      note.textContent = "asking the browser…";
+      note.textContent = "asking the browser (allow GPS for a precise fix)…";
       navigator.geolocation.getCurrentPosition(async pos => {
         try {
           const r = await send("places/location", {
             latitude: pos.coords.latitude, longitude: pos.coords.longitude}, "POST");
-          note.textContent = `Set to ${r.place} (${r["location.latitude"]}, `
-            + `${r["location.longitude"]}). Weather and transit use this now.`;
+          const acc = Math.round(pos.coords.accuracy || 0);
+          note.textContent = `Set to ${r.place}, accurate to about ${acc} m.`
+            + (acc > 500 ? " That is coarse: the browser used the network rather than"
+                         + " GPS. Try again outdoors or on a phone." : "");
         } catch (e) {
           note.textContent = "Could not save: " + e.message;
         }
@@ -275,7 +314,9 @@ function rowFor(key, spec) {
           ? "Permission refused."
           : "Unavailable: " + err.message + " (needs https, or localhost)";
         locate.disabled = false;
-      }, {enableHighAccuracy: false, timeout: 15000, maximumAge: 600000});
+        // High accuracy and no cached fix: a coarse network position put the
+        // nearest stop in the wrong village.
+      }, {enableHighAccuracy: true, timeout: 30000, maximumAge: 0});
     });
     row.append(locate, note);
   }
@@ -300,6 +341,35 @@ function rowFor(key, spec) {
   row.append(status, el("div", "key", key));
   return row;
 }
+
+$("#pw-cancel").addEventListener("click", () => {
+  $("#password-panel").hidden = true;
+  for (const id of ["pw-current", "pw-new", "pw-again"]) $("#" + id).value = "";
+  $("#pw-status").textContent = "";
+});
+
+$("#pw-save").addEventListener("click", async () => {
+  const current = $("#pw-current").value, next = $("#pw-new").value;
+  const status = $("#pw-status");
+  status.className = "status";
+  if (next.length < 4) { status.className = "status err"; status.textContent = "Too short."; return; }
+  if (next !== $("#pw-again").value) {
+    status.className = "status err";
+    status.textContent = "The two do not match.";
+    return;
+  }
+  $("#pw-save").disabled = true;
+  try {
+    await send("auth/password", {current_password: current, new_password: next});
+    status.className = "status ok";
+    status.textContent = "Changed. Other sessions were signed out.";
+    for (const id of ["pw-current", "pw-new", "pw-again"]) $("#" + id).value = "";
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = e.message;
+  }
+  $("#pw-save").disabled = false;
+});
 
 function renderSettings() {
   const groups = {};
@@ -606,7 +676,16 @@ function attachmentBlock(a) {
   return box;
 }
 
-function bubble(role, content, attachments) {
+/* Shown under a sent message so it is obvious afterwards what context it carried. */
+function commandBlock(name) {
+  const cmd = COMMANDS.find(c => c.name === name);
+  const box = el("div", "msg-command");
+  box.append(el("span", "msg-command-mark", "\u26a1"),
+             el("span", null, cmd ? cmd.label : name));
+  return box;
+}
+
+function bubble(role, content, attachments, command) {
   const m = el("div", "msg " + role);
   const head = el("div", "msg-role");
   if (role === "user") {
@@ -628,7 +707,8 @@ function bubble(role, content, attachments) {
   }
   if (role !== "user") m.append(head);
   m.append(body);
-  // One container: the text, then its attachments beneath a divider, stacked.
+  // One container: the text, then what it was sent with beneath, stacked.
+  if (command) m.append(commandBlock(command));
   for (const a of attachments || []) m.append(attachmentBlock(a));
   m.head = head;
   m.body = body;
@@ -738,7 +818,7 @@ function paintChat(messages) {
   let lastCalls = [];        // a stored tool turn does not carry its own arguments
   for (const m of messages) {
     if (m.role === "user") {
-      log.append(bubble("user", m.content, m.attachments));
+      log.append(bubble("user", m.content, m.attachments, m.command));
     } else if (m.role === "tool") {
       const b = el("div", "msg tool");
       // Conversations from before tools carried a label fall back to the call itself.
@@ -770,7 +850,7 @@ async function sendMessage() {
 
   const log = $("#chat-log");
   const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-  log.append(bubble("user", text, sending));
+  log.append(bubble("user", text, sending, COMMAND?.name));
 
   const live = bubble("assistant", "");
   const spinner = el("span", "thinking");
@@ -867,20 +947,26 @@ async function sendMessage() {
 /* A directive prepended to the turn, which aims the model at the right tool without
    taking the decision away from it. The menu is built from /commands, so a new
    command is a dict entry on the server and nothing here. */
-let COMMAND = null;
+let COMMAND = null, COMMANDS = [];
 
 function setCommand(cmd) {
   COMMAND = cmd;
   const chip = $("#quick-chip");
   $("#quick").setAttribute("aria-pressed", String(!!cmd));
   $("#quick").classList.toggle("hearing", !!cmd);
-  if (!cmd) { chip.hidden = true; return; }
+  if (!cmd) {
+    chip.hidden = true;
+    chip.textContent = "";           // nothing left behind if it is shown again
+    $("#composer").placeholder = "Ask IRiS…";
+    return;
+  }
   chip.hidden = false;
   chip.textContent = "";
   chip.append(el("span", null, cmd.label));
-  const clear = el("button", "chip-x", "\u00d7");
+  const clear = el("button", null, "\u00d7");
   clear.type = "button";
   clear.title = "Clear";
+  clear.setAttribute("aria-label", `Clear the ${cmd.label} command`);
   clear.addEventListener("click", () => setCommand(null));
   chip.append(clear);
   const box = $("#composer");
@@ -893,8 +979,8 @@ async function openQuickMenu() {
   const menu = $("#quick-menu");
   if (!menu.hidden) { menu.hidden = true; $("#quick").setAttribute("aria-expanded", "false"); return; }
   menu.textContent = "";
-  let commands = [];
-  try { commands = (await json("commands")).commands; } catch { /* offline */ }
+  try { COMMANDS = (await json("commands")).commands; } catch { /* offline */ }
+  const commands = COMMANDS;
   if (!commands.length) menu.append(el("div", "empty", "No commands available."));
   for (const cmd of commands) {
     const item = el("button", "quick-item");
@@ -1019,6 +1105,13 @@ $("#file-input").addEventListener("change", async e => {
 /* --------------------------------------------------------------- voice -- */
 let recorder = null, chunks = [];
 
+function note(text, isError = false) {
+  const el_ = $("#composer-note");
+  el_.hidden = !text;
+  el_.textContent = text || "";
+  el_.classList.toggle("err", !!isError);
+}
+
 function micState({recording = false, busy = false, disabled = false, title} = {}) {
   const mic = $("#mic");
   mic.setAttribute("aria-pressed", String(recording));
@@ -1034,6 +1127,8 @@ $("#mic").addEventListener("click", async () => {
   // Tailscale is not. `tailscale serve` terminates TLS if you need it remotely.
   if (!navigator.mediaDevices?.getUserMedia) {
     micState({disabled: true, title: "Microphone needs https (or localhost)"});
+    note("The microphone needs https, or localhost. Over Tailscale, run "
+         + "'tailscale serve https / http://127.0.0.1:8000'.", true);
     return;
   }
   let stream;
@@ -1041,6 +1136,7 @@ $("#mic").addEventListener("click", async () => {
     stream = await navigator.mediaDevices.getUserMedia({audio: true});
   } catch (e) {
     micState({title: "Microphone unavailable: " + e.message});
+    note("Microphone unavailable: " + e.message, true);
     return;
   }
 
@@ -1050,6 +1146,7 @@ $("#mic").addEventListener("click", async () => {
   recorder.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
     micState({recording: false, busy: true, title: "Transcribing…"});
+    note("Transcribing…");
     try {
       const form = new FormData();
       form.append("audio", new Blob(chunks, {type: recorder.mimeType}), "speech.webm");
@@ -1061,13 +1158,16 @@ $("#mic").addEventListener("click", async () => {
       box.dispatchEvent(new Event("input"));
       box.focus();
       micState({busy: false, title: `Record a message (heard ${data.language})`});
+      note("");
     } catch (e) {
       micState({busy: false, title: "Transcription failed: " + e.message});
+      note("Transcription failed: " + e.message, true);
       $("#chat-log").append(bubble("tool", "transcription failed: " + e.message));
     }
   };
   recorder.start();
   micState({recording: true, title: "Stop recording"});
+  note("Recording. Press the microphone again to stop.");
 });
 
 /* ---------------------------------------------------------- hands-free -- */
@@ -1108,7 +1208,13 @@ registerProcessor("capture", Capture);
 
 let hf = null;   // {ws, ctx, stream, node} while hands-free is running
 
+const HF_SAYS = {
+  off: "", listening: "Listening for the wake word.", awake: "Go ahead, I'm listening.",
+  thinking: "Working out what you said…",
+};
+
 function hfState(state, title) {
+  note(HF_SAYS[state] ?? title ?? "", state === "off" && !!title);
   const btn = $("#hands-free");
   btn.setAttribute("aria-pressed", String(state !== "off"));
   btn.classList.toggle("busy", state === "thinking");
@@ -1122,7 +1228,7 @@ function hfState(state, title) {
 async function startHandsFree() {
   if (hf) return;
   if (!navigator.mediaDevices?.getUserMedia) {
-    hfState("off", "Microphone needs https (or localhost)");
+    hfState("off", "Hands-free needs https, or localhost.");
     return;
   }
   let stream, ctx, node;
@@ -1217,11 +1323,12 @@ window.addEventListener("pagehide", stopHandsFree);
    form is built from that, so a new device or integration needs no client work. */
 const TYPES = {};      // kind -> [type spec]
 
-function fieldControl(spec, value) {
+function fieldControl(spec, value, onPick) {
   if (spec.type === "boolean")
     return Toggle({checked: value ?? spec.default ?? false, onChange: () => {}});
   if (spec.choices?.length)
-    return Combo({options: spec.choices, value: value ?? spec.default, onChange: () => {}});
+    return Combo({options: spec.choices, value: value ?? spec.default,
+                  onChange: onPick || (() => {})});
   const input = el("input", "input");
   input.type = spec.type === "password" ? "password" : "text";
   if (spec.type === "number") input.inputMode = "numeric";
@@ -1252,16 +1359,35 @@ function buildForm(kind, spec, existing) {
   box.append(nameRow);
 
   const controls = {};
+  // Picking a provider or a make fills in the fiddly fields, so the common case is
+  // one choice rather than five lookups.
+  const applyPreset = choice => {
+    const preset = spec.presets?.[choice];
+    if (!preset) return;
+    for (const [name, value] of Object.entries(preset)) {
+      const control = controls[name];
+      if (!control) continue;
+      if (control.setValue) control.setValue(value);
+      else if (control.value !== undefined) control.value = value;
+      else control.checked = !!value;
+    }
+  };
   for (const f of spec.fields) {
     const row = el("div", "thing-field");
     const label = el("label", null, f.label + (f.required ? " *" : ""));
     row.append(label);
     // A stored secret comes back as dots; leaving them means "unchanged".
-    const control = fieldControl(f, existing?.config?.[f.name]);
+    const control = fieldControl(f, existing?.config?.[f.name],
+                                 f.name === spec.preset_field ? applyPreset : null);
     controls[f.name] = control;
     row.append(control);
     if (f.help) row.append(el("div", "desc", f.help));
     box.append(row);
+  }
+  // Apply the default preset on a new instance, so the form opens already filled.
+  if (!existing && spec.preset_field) {
+    const initial = spec.fields.find(f => f.name === spec.preset_field)?.default;
+    if (initial) applyPreset(initial);
   }
 
   const status = el("div", "status");
@@ -1313,6 +1439,11 @@ async function showTypePicker(kind) {
     grid.append(card);
   }
   box.append(grid);
+  const cancel = el("button", "ghost", "cancel");
+  cancel.type = "button";
+  cancel.style.marginTop = ".7rem";
+  cancel.addEventListener("click", () => { host.textContent = ""; });
+  box.append(cancel);
   host.append(box);
 }
 
@@ -1661,6 +1792,7 @@ function listen() {
   loadConversations({selectLatest: true});
   listen();
   syncHandsFree();
+  json("commands").then(d => { COMMANDS = d.commands; }).catch(() => {});
   $("#composer").focus();
 })();
 </script>

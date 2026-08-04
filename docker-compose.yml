@@ -38,6 +38,10 @@ services:
   api:
     build: ./api
     restart: unless-stopped
+    # Read-only: this is so IRiS can report its own GPU rather than inventing a
+    # number for it. Holding the device allocates nothing.
+    devices:
+      - nvidia.com/gpu=all
     environment:
       OLLAMA_URL: http://ollama:11434
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

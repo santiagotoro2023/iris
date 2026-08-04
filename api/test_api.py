@@ -600,7 +600,27 @@ def test_secret_fields_never_reach_a_client():
 
     internal = registry._row(row, redact=False)
     assert internal["config"]["password"] == "s3cret"
-    assert spec.fields[0].name == "host"
+    # Exactly the credential fields are marked secret, and nothing else.
+    secret = {f.name for f in spec.fields if f.secret}
+    assert secret == {"password"}, secret
+
+
+def test_a_preset_only_names_fields_that_exist():
+    """A preset that fills a field the type does not have is silently ignored by the
+    client, which looks like the preset not working."""
+    for kind in ("device", "integration"):
+        for spec in registry.types_of(kind):
+            if not spec.presets:
+                continue
+            names = {f.name for f in spec.fields}
+            assert spec.preset_field in names, (spec.name, spec.preset_field)
+            for label, preset in spec.presets.items():
+                unknown = set(preset) - names
+                assert not unknown, (spec.name, label, unknown)
+            # Every choice offered must have a preset, even an empty one for "Other".
+            choices = next(f.choices for f in spec.fields
+                           if f.name == spec.preset_field)
+            assert set(choices) == set(spec.presets), (spec.name, choices)
 
 
 def test_editing_without_retyping_a_secret_keeps_it():

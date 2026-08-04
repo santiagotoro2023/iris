@@ -58,9 +58,8 @@ settings.setting(
     enum=["large-v3", "large-v2", "medium", "small", "base", "tiny",
           "distil-large-v3"],
     default=os.environ.get("STT_MODEL", "large-v3"),
-    title="Speech model",
-    description="Larger is more accurate and uses more VRAM, which is shared with "
-                "the language model.")
+    title="Speech model", order=81,
+    description="Larger is more accurate and uses more of the GPU.")
 settings.setting(
     "voice.stt_device", type="string", enum=["cuda", "cpu"],
     default=os.environ.get("STT_DEVICE", "cuda"),
@@ -92,37 +91,32 @@ settings.setting(
 
 settings.setting(
     "voice.speak_replies", type="boolean", default=True,
-    title="Speak replies aloud",
-    description="Play IRiS's answers as speech automatically. You can always play an "
-                "individual reply with the speaker button.")
+    title="Speak replies aloud", order=1,
+    description="Play answers automatically. The speaker button on a reply always "
+                "works either way.")
 settings.setting(
     "voice.engine", type="string", enum=["piper", "xtts"],
     default=os.environ.get("TTS_ENGINE", "piper"),
-    title="Voice engine",
-    description="piper: CPU only, ~30x realtime, has explicitly British voices, and "
-                "never competes with the language model for VRAM. xtts: more expressive "
-                "but needs 1.65 GB of GPU memory it cannot have while the language "
-                "model is loaded, so it falls back to CPU and becomes too slow to keep "
-                "up with playback.")
+    title="Voice engine", order=80,
+    description="Piper is fast, British, and stays out of the GPU's way. XTTS is more "
+                "expressive but too slow here to keep up with playback.")
 settings.setting(
     "voice.tts_speaker", type="string", enum=_tts_speakers,
     default=os.environ.get("TTS_SPEAKER", "en_GB-cori-high"),
-    title="Voice",
-    description="Built-in speaker for the selected engine. en_GB voices are listed "
-                "first. Use the preview button to audition one.")
+    title="Voice", order=2,
+    description="British voices are listed first. Press preview to hear one.")
 settings.setting(
     "voice.tts_language", type="string", enum=["en", "de", "fr", "it", "es"],
     default="en", title="Speaking language",
     description="XTTS renders the same voice in each supported language.")
 settings.setting(
     "voice.tts_speed", type="number", minimum=0.5, maximum=1.6, default=1.1,
-    title="Speaking pace",
+    title="Speaking pace", order=3,
     description="1.0 is natural. Lower is more deliberate, higher is brisker.")
 settings.setting(
     "voice.expressiveness", type="number", minimum=0.0, maximum=1.0, default=0.25,
-    title="Expressiveness",
-    description="How much the voice varies in pitch and pacing. Low is level and "
-                "matter-of-fact; high gets excitable.")
+    title="Expressiveness", order=4,
+    description="Low is level and matter-of-fact. High gets excitable.")
 settings.setting(
     "voice.tts_device", type="string", enum=["cuda", "cpu"],
     default=os.environ.get("TTS_DEVICE", "cuda"),

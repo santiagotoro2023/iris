@@ -88,21 +88,18 @@ def _wake_models() -> list[str]:
 
 settings.setting(
     "voice.hands_free", type="boolean", default=False,
-    title="Hands-free listening",
-    description="Keep the microphone open and wait for the wake word. Off by default "
-                "because it holds the microphone for as long as the page is open.")
+    title="Hands-free listening", order=5,
+    description="Keep the microphone open and wait for the wake word.")
 settings.setting(
     "voice.wake_model", type="string", enum=_wake_models, default="computer",
-    title="Wake word",
-    description="Which phrase wakes IRiS. There is no public model for 'IRiS' yet, so "
-                "the default is 'computer': not somebody's name, and it scores 0.99 on "
-                "its own phrase against 0.001 on unrelated speech. A trained model "
-                "dropped into data/wakewords appears here on its own.")
+    title="Wake word", order=6,
+    description="Which phrase wakes IRiS. 'computer' is the most reliable. "
+                "'hey_iris' works too, with sensitivity raised to about 0.85.")
 settings.setting(
     "voice.wake_sensitivity", type="number", minimum=0.1, maximum=0.95, default=0.5,
-    title="Wake word sensitivity",
-    description="Score a phrase must reach to count as the wake word. Lower wakes more "
-                "readily and misfires more; higher needs a clearer say of it.")
+    title="Wake word sensitivity", order=7,
+    description="Lower wakes more readily and misfires more. 0.5 suits 'computer'; "
+                "'hey iris' needs about 0.85.")
 settings.setting(
     "voice.end_silence", type="number", minimum=0.3, maximum=3.0, default=0.8,
     title="End of turn silence (seconds)",

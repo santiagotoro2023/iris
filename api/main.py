@@ -61,27 +61,27 @@ def _installed_models() -> list[str]:
 settings.setting(
     "llm.model", type="string", enum=_installed_models,
     default=os.environ.get("IRIS_MODEL", "qwen3:8b"),
-    title="Model", description="Ollama model tag used for reasoning. "
-                               "Lists the models currently pulled on this machine.")
+    title="Model", order=1,
+    description="Which model does the thinking. Only models already downloaded "
+                "are listed.")
 settings.setting(
     "llm.think", type="string", enum=["never", "always", "model-default"],
     default={"true": "always", "false": "never"}.get(
         os.environ.get("IRIS_THINK", "").strip().lower(), "model-default"),
-    title="Reasoning mode",
-    description="Reason before answering. 'always' is far more accurate on hard "
-                "questions and far slower; 'never' keeps replies conversational.")
+    title="Reasoning mode", order=2,
+    description="'always' is more accurate on hard questions and much slower. "
+                "'never' keeps replies quick and conversational.")
 settings.setting(
     "llm.search_policy", type="string",
     enum=["aggressive", "balanced", "sparing", "off"], default="aggressive",
-    title="Web search",
-    description="How readily IRiS checks the web. Training data goes stale, searches are "
-                "fast, so 'aggressive' is the default: it looks things up rather than "
-                "trusting its memory.")
+    title="Web search", order=3,
+    description="How readily IRiS looks things up instead of answering from memory.")
 settings.setting(
     "general.timezone", type="string",
     enum=lambda: sorted(zoneinfo.available_timezones()),
     default=os.environ.get("IRIS_TZ", "Europe/Zurich"),
-    title="Timezone", description="IANA timezone used for times IRiS reports.")
+    title="Timezone", order=1,
+    description="Used for every time IRiS tells you.")
 
 
 @asynccontextmanager

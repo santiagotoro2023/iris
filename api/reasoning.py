@@ -101,8 +101,8 @@ QUICK_COMMANDS: dict[str, dict] = {
                      "each. Do not invent messages that are not listed.",
     },
     "calendar": {
-        "label": "What's on",
-        "hint": "optional: what you want to know",
+        "label": "Schedule",
+        "hint": "optional: a day, or what you are looking for",
         "directive": "Use the calendar tool. List what is on with times, nothing "
                      "more. Do not invent appointments.",
     },
@@ -286,6 +286,19 @@ async def _departures(station: str = ""):
 async def _find_place(query: str, near: str = ""):
     import places
     return await places.find_place(query, near)
+
+
+@tool("system_status",
+      "Measure what this machine is actually doing right now: GPU load and "
+      "temperature, which models are resident in VRAM, CPU load, memory, disk, "
+      "uptime, and which services are responding. Use this for ANY question about "
+      "how you are running, what you are doing, how busy you are, or how you feel "
+      "physically. Never answer such a question without calling this first.",
+      {"type": "object", "properties": {}},
+      activity="Checking my own state", display="lines")
+async def _system_status():
+    import system
+    return await system.describe()
 
 
 @tool("weather",

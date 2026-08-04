@@ -28,6 +28,16 @@ _listeners: set[asyncio.Queue] = set()
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+# Groups in the order somebody actually reaches for them. Anything unlisted lands
+# after these, alphabetically.
+GROUP_ORDER = ["llm", "persona", "voice", "memory", "location", "proactive",
+               "cameras", "devices", "frigate", "backup", "auth", "vision", "general"]
+
+
+def group_rank(group: str) -> int:
+    return GROUP_ORDER.index(group) if group in GROUP_ORDER else len(GROUP_ORDER)
+
+
 def setting(key: str, **schema) -> None:
     """Register one setting. Dotted keys group in the UI: 'llm.model' -> group 'llm'."""
     if "default" not in schema:
@@ -49,9 +59,22 @@ def _resolve(spec: dict) -> dict:
     return {**spec, "enum": list(spec["enum"]())}
 
 
+def ordered_keys() -> list[str]:
+    """Most-reached-for first, obscure last. `order` defaults to 50, so a setting
+    only needs a number when it should be pulled forward or pushed back."""
+    def rank(key: str):
+        spec = REGISTRY[key]
+        group = key.split(".")[0] if "." in key else "general"
+        return (group_rank(group), group, spec.get("order", 50),
+                spec.get("title", key))
+    return sorted(REGISTRY, key=rank)
+
+
 def schema() -> dict:
+    # Emitted in display order: the client renders whatever order it is given, and
+    # JSON objects keep their insertion order all the way to the browser.
     return {"type": "object",
-            "properties": {k: _resolve(v) for k, v in REGISTRY.items()},
+            "properties": {k: _resolve(REGISTRY[k]) for k in ordered_keys()},
             "additionalProperties": False}
 
 

@@ -18,6 +18,10 @@
 }
 
 * { box-sizing: border-box; }
+/* An author `display` rule outranks the UA stylesheet's [hidden] { display: none },
+   so anything given a display value silently ignores element.hidden. That is how the
+   quick-command chip stayed on screen after being cleared. */
+[hidden] { display: none !important; }
 html, body { height: 100%; overflow: hidden; }
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
@@ -398,15 +402,29 @@ button { font: inherit; color: inherit; }
 .quick-item:hover { background: var(--panel-2); }
 .quick-item b { font-weight: 500; font-size: .86rem; }
 .quick-item span { font-size: .72rem; color: var(--dim); }
-.chip { display: inline-flex; align-items: center; gap: .45rem; align-self: flex-start;
-        margin-bottom: .5rem; padding: .2rem .3rem .2rem .6rem; font-size: .76rem;
-        color: var(--orange); border: 1px solid var(--orange); background: #1a1005; }
-.chip-x { background: none; border: 0; color: inherit; cursor: pointer;
-          font-size: 1rem; line-height: 1; padding: 0 .25rem; }
-.chip-x:hover { color: var(--text); }
+/* Named apart from the attachment .chip, which it used to collide with. */
+.cmd-chip { display: inline-flex; align-items: center; gap: .45rem; align-self: flex-start;
+            margin-bottom: .5rem; padding: .2rem .3rem .2rem .6rem; font-size: .76rem;
+            color: var(--orange); border: 1px solid var(--orange); background: #1a1005; }
+.cmd-chip button { background: none; border: 0; color: inherit; cursor: pointer;
+                   font-size: 1rem; line-height: 1; padding: 0 .25rem; }
+.cmd-chip button:hover { color: var(--text); }
+
+/* Anything the composer needs to say out loud, rather than in a title attribute
+   nobody hovers over. */
+.composer-note { font-size: .74rem; color: var(--dim); margin-bottom: .4rem; }
+.composer-note.err { color: var(--err); }
 
 /* Tool results: one look for every tool, with the line the tool declared. */
 .tool-tick { color: var(--orange); margin-right: .45rem; }
 .tool-count { margin-left: auto; font-size: .66rem; color: var(--dim); }
 .tool-lineitem { padding: .18rem 0; line-height: 1.5; }
 .tool-lineitem + .tool-lineitem { border-top: 1px solid var(--line); }
+
+/* What a message was sent with, under the message itself. */
+.msg-command { display: inline-flex; align-items: center; gap: .4rem;
+               margin: .5rem 0 0; padding: .2rem .5rem; font-size: .72rem;
+               color: var(--orange); border: 1px solid var(--line);
+               background: #0b0c0e; align-self: flex-start; }
+.msg.user .msg-command { margin-left: auto; }
+.msg-command-mark { font-size: .8rem; line-height: 1; }

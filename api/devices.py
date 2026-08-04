@@ -66,13 +66,12 @@ async def _listen_action(thing: dict, user: dict) -> dict:
 
 registry.register(registry.Type(
     kind="device", name="microphone", label="Microphone",
-    description="A network microphone or audio stream. IRiS records a span of it, "
-                "transcribes it, and files it in memory.",
+    description="IRiS records a span of it, transcribes it, and files it in memory.",
     fields=[
         registry.Field("url", "Stream URL", type="password", required=True,
                        secret=True,
-                       help="rtsp:// or http:// audio stream. Many cameras expose "
-                            "their microphone on the same URL as the video."),
+                       help="An rtsp:// or http:// audio stream. Many cameras carry "
+                            "their microphone on the video URL."),
         registry.Field("seconds", "Seconds to record", type="number",
                        default=30,
                        help="Leave blank to use the global default."),

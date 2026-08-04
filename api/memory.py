@@ -54,16 +54,13 @@ def _embed_models() -> list[str]:
 
 settings.setting(
     "memory.enabled", type="boolean", default=True,
-    title="Memory",
-    description="Remember things between conversations. Off makes every conversation "
-                "start from nothing.")
+    title="Memory", order=1,
+    description="Off makes every conversation start from nothing.")
 settings.setting(
     "memory.embed_model", type="string", enum=_embed_models, default=os.environ.get("IRIS_EMBED_MODEL", "bge-m3"),
-    title="Embedding model",
-    description="Turns text into the vector memories are searched by. bge-m3 is "
-                "multilingual, which matters for switching between English and German. "
-                "Changing this makes existing memories unsearchable until they are "
-                "rebuilt, because the vectors are a different shape.")
+    title="Embedding model", order=80,
+    description="How memories are searched. Changing it makes existing memories "
+                "unfindable until they are rebuilt.")
 settings.setting(
     "memory.recall_count", type="integer", minimum=1, maximum=20, default=5,
     title="Memories to recall",
@@ -71,26 +68,23 @@ settings.setting(
                 "More context costs speed and can crowd out the actual question.")
 settings.setting(
     "memory.min_score", type="number", minimum=0.2, maximum=0.95, default=0.42,
-    title="Recall threshold",
-    description="How close a memory must be to the question before it is recalled. "
-                "Measured with bge-m3 on full-sentence questions: genuine matches "
-                "score down to 0.43 and unrelated ones up to 0.37. The bands are "
-                "close, so this is worth tuning by eye once there are real memories.")
+    title="Recall threshold", order=82,
+    description="How close a memory must be to the question before it is used. Lower "
+                "remembers more and drags in irrelevant things.")
 settings.setting(
     "memory.retention_days", type="integer", minimum=0, maximum=3650, default=30,
-    title="Keep transcripts for (days)",
+    title="Keep transcripts for (days)", order=3,
     description="Conversations older than this are deleted nightly. What IRiS learned "
                 "from them was already distilled into memories and is kept, so this "
                 "expires the verbatim record, not the knowledge. 0 keeps everything.")
 settings.setting(
     "memory.auto_capture", type="boolean", default=True,
-    title="Learn from conversations",
-    description="After each exchange, quietly pick out anything durable worth keeping "
-                "and remember it. Without this, memory only fills when IRiS thinks to "
-                "store something, which it often does not.")
+    title="Learn from conversations", order=2,
+    description="Quietly keep anything durable you mention, so you do not have to "
+                "tell it to remember.")
 settings.setting(
     "memory.dedup_score", type="number", minimum=0.8, maximum=1.0, default=0.93,
-    title="Duplicate threshold",
+    title="Duplicate threshold", order=83,
     description="A new memory this similar to an existing one replaces it instead of "
                 "piling up near-identical copies.")
 

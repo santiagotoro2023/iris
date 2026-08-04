@@ -33,31 +33,27 @@ router = APIRouter(prefix="/places", tags=["places"])
 
 settings.setting(
     "location.home", type="string", default="",
-    title="Home",
-    description="Your home station or address. Lets you ask for 'the next train home' "
-                "instead of naming the stop every time. Left empty, IRiS will ask.")
+    title="Home", order=1,
+    description="Your home stop or address, so 'the next train home' works.")
 settings.setting(
     "location.work", type="string", default="",
-    title="Work",
-    description="Same idea for the other end of the commute.")
+    title="Work", order=2,
+    description="The other end of the commute.")
 settings.setting(
     "location.latitude", type="number", minimum=-90, maximum=90, default=0.0,
-    title="Latitude",
-    description="Set by 'use my location' in the browser. Weather uses this directly "
-                "when it is set, which is far more precise than a town name.")
+    title="Latitude", order=85,
+    description="Filled in by 'use my location' above.")
 settings.setting(
     "location.longitude", type="number", minimum=-180, maximum=180, default=0.0,
-    title="Longitude")
+    title="Longitude", order=86)
 settings.setting(
     "location.region", type="string", default="Switzerland",
-    title="Where to search",
-    description="Biases place searches, so 'a pharmacy' means a nearby one rather "
-                "than one on another continent.")
+    title="Where to search", order=87,
+    description="Used only when nothing more precise is known.")
 settings.setting(
     "location.enabled", type="boolean", default=True,
-    title="Transit and places",
-    description="Public transport times and place lookup. Both are free services that "
-                "need no account. Transit covers Switzerland only.")
+    title="Transit and places", order=3,
+    description="Timetables, maps and weather. Timetables cover Switzerland.")
 
 
 _HERE = {"here", "current location", "my location", "where i am", "nearby",
@@ -78,12 +74,13 @@ async def nearest_stop() -> str:
         r = await c.get(f"{TRANSPORT_URL}/locations", params={"x": lon, "y": lat})
     if r.status_code != 200:
         return ""
-    for station in r.json().get("stations") or []:
-        # Entries without an id are addresses rather than stops, and the timetable
-        # cannot depart from a street number.
-        if station.get("id") and station.get("name"):
-            return station["name"]
-    return ""
+    # Sorted by distance, but the list mixes addresses in with real stops and an
+    # address cannot be departed from. Take the closest thing with an id.
+    stops = [s for s in (r.json().get("stations") or [])
+             if s.get("id") and s.get("name")]
+    stops.sort(key=lambda s: s.get("distance") if s.get("distance") is not None
+               else float("inf"))
+    return stops[0]["name"] if stops else ""
 
 
 async def resolve(name: str) -> str:
@@ -349,8 +346,10 @@ async def set_location(body: Position, user: dict = Depends(auth.active_user)):
     """The browser knows where it is; the server does not. Stored as settings so it
     is visible and editable like everything else (SPEC.md 3.1)."""
     name = await reverse(body.latitude, body.longitude)
-    patch = {"location.latitude": round(body.latitude, 4),
-             "location.longitude": round(body.longitude, 4)}
+    # Six decimals is ~0.1 m. Four was ~11 m, which is enough to land on the wrong
+    # side of a village and pick the wrong bus stop.
+    patch = {"location.latitude": round(body.latitude, 6),
+             "location.longitude": round(body.longitude, 6)}
     # Only fill Home if it is empty: a name he typed himself outranks a guess.
     if name and not settings.get("location.home"):
         patch["location.home"] = name

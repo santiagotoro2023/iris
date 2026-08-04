@@ -414,10 +414,11 @@ just sessions, so its data has to survive a container recreate.
   **both** paths of `setup.sh` and this README in the same change.
 - Config files belong in the repo (e.g. `mosquitto/`); `./data/` is runtime state
   only and is gitignored.
-- API tests (the file is not in the image, so it is mounted in):
+- API tests. The bind mount matters: `COPY *.py` bakes the tests into the image, so
+  without it you silently run the copy from the last build.
   ```
-  docker compose run --rm --no-deps -v "$PWD/api/test_api.py:/app/test_api.py:ro" \
-    --entrypoint sh api -c "pip install -q pytest && python -m pytest test_api.py -q"
+  docker compose run --rm --no-deps -v "$PWD/api:/app:ro" --entrypoint sh api \
+    -c "pip install -q pytest && python -m pytest test_api.py -q"
   ```
 - openWakeWord 0.6.0 declares a hard `tflite-runtime` dependency with no Python 3.12
   wheel, so a plain `pip install openwakeword` silently resolves back to 0.4.0 and a

@@ -22,7 +22,8 @@ RUN pip install --no-cache-dir \
  && pip install --no-cache-dir --no-deps openwakeword==0.6.0 \
  && python -c "import openwakeword.utils as u; u.download_models()"
 
-COPY main.py settings.py auth.py reasoning.py persona.py activity.py chat.py \
-     voice.py files.py wake.py memory.py backup.py cameras.py places.py registry.py devices.py integrations.py proactive.py frigate.py ./
+# Every module, rather than a hand-kept list: that list went stale twice, and a
+# missing module fails at import on container start rather than at build.
+COPY *.py ./
 COPY static ./static
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

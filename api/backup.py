@@ -46,15 +46,13 @@ router = APIRouter(prefix="/backup", tags=["backup"])
 
 settings.setting(
     "backup.enabled", type="boolean", default=True,
-    title="Nightly backup",
-    description="Encrypt and archive everything IRiS knows once a day: memories, "
-                "conversations, settings and accounts.")
+    title="Nightly backup", order=1,
+    description="Archive everything IRiS knows, once a day, encrypted.")
 settings.setting(
     "backup.at", type="string",
     enum=[f"{h:02d}:00" for h in range(24)], default="03:00",
-    title="Backup time",
-    description="Local time the daily backup runs. If the machine was off, it runs "
-                "at the next opportunity instead of skipping the day.")
+    title="Backup time", order=2,
+    description="When it runs. If the machine was off, it runs at the next chance.")
 settings.setting(
     "backup.keep", type="integer", minimum=1, maximum=365, default=14,
     title="Backups to keep",
