@@ -1640,3 +1640,49 @@ The cap is now the disk, not a number: an upload is refused only if it would com
 within 5 GB of filling the volume the databases live on. Uploading shows the file and
 its size while it transfers, then says it is being read, because a two-minute video
 takes long enough that silence reads as failure.
+
+
+## 44. The Regression: Too Many Tools
+
+Santiago: *"it seems a lot worse in responses right now... it doesent use the right
+tools doesent response right etc. what happened"*. Two symptoms, one cause.
+
+- Asked "what is SIDMAR AG and how do I get there", it searched and then replied "It
+  seems you've provided information about SIDMAR AG. Could you clarify what you'd like
+  assistance with?" It had lost track of who said what and read its own tool result as
+  the user's message.
+- Asked "what's the weather like here" straight afterwards, it passed
+  `place="Mönchaltorf"` from the previous exchange instead of omitting it.
+
+**Measured before guessing: 18 tools, 7,492 characters of tool schema and an 8,335
+character persona. Nearly 16,000 characters, about 4,000 tokens, before he said a
+word.** Both symptoms are what an 8B model does under that load: it fills optional
+arguments from whatever is nearby and stops tracking roles.
+
+The cause was accretion, mine. Every request added a tool or a rule and nothing was
+ever removed.
+
+**Cut 41%, to 9,362 characters:**
+
+- `analyze_image`, `analyze_document` and `analyze_video` called one identical
+  function that dispatches on file extension. They are one `analyze_file`.
+- `list_uploads` went: the not-found message already lists what is available.
+- The persona lost its accreted duplication. The em-dash and emoji sections shrank to
+  one line each, because both are enforced in code (§22) and the prompt was arguing a
+  case already won.
+
+**Precision was then put back.** Santiago: *"The tool schemas should not be less
+precise, same functionality but maybe done more efficiently"*. Right, and the first
+pass had cut the trigger phrases that actually route an 8B model, not just padding.
+"who is at a door, whether a parcel arrived", "whether someone replied", "whether they
+are free" all came back; what stayed cut was elaboration the persona already covered.
+Terse is not the same as vague.
+
+Verified afterwards, all four correct: the SIDMAR question now searches and calls
+`route_to`; "the weather here" omits the place; "what are you doing" calls
+`system_status` and reports its numbers; "next bus to uster" finds the nearest stop.
+
+**One trap found while verifying.** The persona's worked example for `system_status`
+contained plausible numbers, and the model reproduced them verbatim. An example that
+can be parroted as fact is worse than none, so it now shows the shape with the figures
+left as placeholders.

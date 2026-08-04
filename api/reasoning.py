@@ -176,9 +176,8 @@ def _current_time():
 
 
 @tool("remember",
-      "Store something durable about the user that is worth knowing in future "
-      "conversations: a preference, a fact about them, their setup, a decision they "
-      "made. Do NOT store passing chat, questions, or things you merely looked up.",
+      "Store a durable fact about the user. Not passing chat, questions, or "
+      "anything you looked up.",
       {"type": "object",
        "properties": {"text": {"type": "string",
                                "description": "The fact, written as a standalone "
@@ -197,9 +196,8 @@ async def _remember(text: str):
 
 
 @tool("recall",
-      "Search your memory for what you already know about the user. Automatic recall "
-      "already runs on every turn, so only use this when you need something specific "
-      "that was not surfaced, such as an older detail.",
+      "Search your memory for an older detail. Relevant memories are already "
+      "supplied each turn.",
       {"type": "object",
        "properties": {"query": {"type": "string",
                                 "description": "What you are trying to remember."}},
@@ -216,9 +214,8 @@ async def _recall(query: str):
 
 
 @tool("check_mail",
-      "Look in the user's configured mailboxes and report what has arrived. Use this "
-      "for any question about email, messages waiting, or whether someone has "
-      "replied.",
+      "What has arrived in the user's mailboxes: new mail, waiting messages, "
+      "whether someone replied.",
       {"type": "object", "properties": {}},
       activity="Looking in the mailbox", display="lines")
 async def _check_mail():
@@ -227,8 +224,8 @@ async def _check_mail():
 
 
 @tool("calendar",
-      "What is on the user's calendar. Use this for any question about appointments, "
-      "meetings, what they have on, or whether they are free.",
+      "The user's calendar: appointments, meetings, what they have on, whether "
+      "they are free.",
       {"type": "object",
        "properties": {}},
       activity="Checking the calendar", display="lines")
@@ -238,9 +235,8 @@ async def _calendar():
 
 
 @tool("transit",
-      "Public transport times in Switzerland. Give only the destination unless the "
-      "user named a starting point: the origin defaults to the nearest stop to where "
-      "they are. Also accepts 'home' and 'work'.",
+      "Public transport times. Give only the destination; the origin defaults to "
+      "the user's nearest stop. Accepts 'home' and 'work'.",
       {"type": "object",
        "properties": {
            "destination": {"type": "string", "description": "Where the journey ends."},
@@ -258,9 +254,8 @@ async def _transit(destination: str, origin: str = "", when: str = ""):
 
 
 @tool("departures",
-      "The next departures from a Swiss stop, as on the board at the platform. Use "
-      "this when asked what is leaving soon rather than for a specific journey. Omit "
-      "the station to use the nearest stop to where they are.",
+      "The departure board at a stop: what is leaving soon, rather than a specific "
+      "journey. Omit the station for the user's nearest.",
       {"type": "object",
        "properties": {"station": {"type": "string",
                                   "description": "Station or stop name. Omit for the "
@@ -272,10 +267,9 @@ async def _departures(station: str = ""):
 
 
 @tool("route_to",
-      "How to get to a named place: finds it on the map, gives its address and how "
-      "far it is, and plans public transport there from where the user is. Use this "
-      "for 'how do I get there', 'how do I get to X', and any question about "
-      "reaching somewhere.",
+      "How to reach a named place: finds it, gives its address and distance, and "
+      "plans public transport there. Use for 'how do I get to X' and 'how do I get "
+      "there'.",
       {"type": "object",
        "properties": {"place": {"type": "string",
                                 "description": "The place, shop, company or address "
@@ -288,8 +282,8 @@ async def _route_to(place: str):
 
 
 @tool("find_place",
-      "Find shops, restaurants, amenities and addresses on the map. Use this for "
-      "'where is the nearest X' questions rather than searching the web.",
+      "Find shops, restaurants, amenities and addresses on the map. Use for "
+      "'where is the nearest X', not a web search.",
       {"type": "object",
        "properties": {
            "query": {"type": "string",
@@ -304,60 +298,23 @@ async def _find_place(query: str, near: str = ""):
     return await places.find_place(query, near)
 
 
-def _file_arg(name: str) -> str:
-    return {"type": "object",
-            "properties": {
-                "file": {"type": "string",
-                         "description": "The uploaded file's name. Omit to use the "
-                                        "most recent upload."},
-                "question": {"type": "string",
-                             "description": "What to look for. Omit for a general "
-                                            "description."}}}
-
-
-@tool("analyze_image",
-      "Look at an uploaded picture again and answer a specific question about it. "
-      "The description from the upload is already in the conversation; use this when "
-      "a new question needs a fresh look.",
-      _file_arg("image"),
+@tool("analyze_file",
+      "Read an uploaded picture, document or video again to answer a specific "
+      "question about it: what it shows, what it says, what happens in it.",
+      {"type": "object",
+       "properties": {
+           "file": {"type": "string",
+                    "description": "The file's name. Omit for the most recent."},
+           "question": {"type": "string", "description": "What to look for."}}},
       activity="Looking at {file}", display="text")
-async def _analyze_image(file: str = "", question: str = ""):
+async def _analyze_file(file: str = "", question: str = ""):
     import files
     return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
-
-
-@tool("analyze_document",
-      "Read an uploaded document again and answer a specific question about it.",
-      _file_arg("document"),
-      activity="Reading {file}", display="text")
-async def _analyze_document(file: str = "", question: str = ""):
-    import files
-    return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
-
-
-@tool("analyze_video",
-      "Watch an uploaded video and answer questions about it. Frames are sampled "
-      "across its whole length and any speech is transcribed.",
-      _file_arg("video"),
-      activity="Watching {file}", display="text")
-async def _analyze_video(file: str = "", question: str = ""):
-    import files
-    return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
-
-
-@tool("list_uploads",
-      "List the files that have been uploaded and can still be looked at.",
-      {"type": "object", "properties": {}},
-      activity="Checking what has been uploaded", display="lines")
-async def _list_uploads():
-    import files
-    names = files.recent(20)
-    return "\n".join(f"- {n}" for n in names) or "Nothing has been uploaded."
 
 
 @tool("where_am_i",
-      "Where the user currently is, and the nearest public transport stop to them. "
-      "Use this whenever a question depends on their location.",
+      "Where the user is now, and their nearest stop. Required before anything "
+      "that depends on where they are.",
       {"type": "object", "properties": {}},
       activity="Working out where you are", display="lines")
 async def _where_am_i():
@@ -366,11 +323,9 @@ async def _where_am_i():
 
 
 @tool("system_status",
-      "Measure what this machine is actually doing right now: GPU load and "
-      "temperature, which models are resident in VRAM, CPU load, memory, disk, "
-      "uptime, and which services are responding. Use this for ANY question about "
-      "how you are running, what you are doing, how busy you are, or how you feel "
-      "physically. Never answer such a question without calling this first.",
+      "This machine's measured GPU load and temperature, resident models, CPU, "
+      "memory, disk, uptime and service health. Required for any question about how "
+      "you are running, what you are doing, or how busy you are.",
       {"type": "object", "properties": {}},
       activity="Checking my own state", display="lines")
 async def _system_status():
@@ -379,13 +334,14 @@ async def _system_status():
 
 
 @tool("weather",
-      "The current weather and the forecast for today and tomorrow. Use this for any "
-      "question about the weather, what to wear, or whether to take an umbrella.",
+      "Weather now and the forecast for today and tomorrow: what to wear, whether "
+      "to take an umbrella.",
       {"type": "object",
        "properties": {"place": {"type": "string",
-                                "description": "Town or address. OMIT THIS unless the "
-                                               "user named a place: left out, it uses "
-                                               "where they actually are."}}},
+                                "description": "OMIT unless the user names a place in "
+                                               "THIS message. Left out it uses where "
+                                               "they are, which is almost always "
+                                               "right."}}},
       activity="Checking the weather {place}", display="lines")
 async def _weather(place: str = ""):
     import places
@@ -393,9 +349,8 @@ async def _weather(place: str = ""):
 
 
 @tool("look_at_camera",
-      "Look at what a home camera can see right now and describe it. Use this "
-      "whenever asked what is happening somewhere in the house, whether anyone is at "
-      "a door, or whether something has been delivered.",
+      "Look at a camera now: who is at a door, whether a parcel arrived, what is "
+      "happening in a room.",
       {"type": "object",
        "properties": {"camera": {"type": "string",
                                  "description": "The camera's name, as configured."}},
@@ -410,9 +365,8 @@ async def _look_at_camera(camera: str):
 
 
 @tool("web_search",
-      "Search the live web. Use this whenever the answer depends on anything you are "
-      "not certain of: current events, a specific company, person, product, place, "
-      "price, version or date. Prefer searching over answering from memory.",
+      "Search the live web. Use whenever the answer depends on anything you are "
+      "not certain of.",
       {"type": "object",
        "properties": {"query": {"type": "string",
                                 "description": "Search terms. Include distinguishing "
