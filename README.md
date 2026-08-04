@@ -118,8 +118,11 @@ one land in the same conversation. Talking over IRiS stops it and captures what 
 said instead (*Interrupt while speaking*).
 
 > **The wake word is not "IRiS" yet.** No pre-trained openWakeWord model for that
-> phrase exists publicly, so the six bundled words ship as stand-ins and the default
-> is `hey_jarvis`. Training an "IRiS" model is a separate job; drop the resulting
+> phrase exists publicly. The six words bundled with openWakeWord are all names, so
+> `setup.sh` also fetches four that are not — `computer`, `ok_computer`, `ok_home`
+> and `hey_house` — and the default is **`computer`**, measured at 0.99 on its own
+> phrase against 0.001 on unrelated speech. Training an "IRiS" model is a separate
+> job; drop the resulting
 > `.onnx` into `./data/wakewords/` and it appears in the *Wake word* dropdown on its
 > own, no restart. Wake detection is deliberately suppressed while IRiS is speaking,
 > so it cannot wake itself, and barge-in leans on the browser's echo cancellation.

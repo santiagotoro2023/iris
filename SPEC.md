@@ -910,6 +910,24 @@ no events; "Hey Jarvis." fires `wake`; the following sentence produces
 `listening` → `thinking` → `transcript: "Stop talking for a moment, I have a
 question."`; and speech during playback produces `barge_in`.
 
+**Wake words that are not names.** Santiago: *"are there any other non-name specific
+words we can use to wake it i dont want jarvis"*. All six words bundled with
+openWakeWord are names, so `setup.sh` fetches four from the Home Assistant community
+collection (~200 KB each) and the default is now **`computer`**. Measured against our
+own Piper voice, peak score on its own phrase versus on unrelated speech:
+
+| model | its phrase | other speech |
+|---|---|---|
+| `computer` | **0.990** | 0.001 |
+| `ok_computer` | 0.881 | 0.001 |
+| `ok_home` | 0.869 | 0.001 |
+| `hey_house` | 0.854 | 0.001 |
+| `glados` | 0.001 | 0.001 |
+
+`glados` was tried first, being thematically ideal, and is a dud: it never fires at
+any pronunciation, so it is deliberately not shipped. None of the 122 community
+models is an "iris".
+
 **Open, and Santiago's call: the wake word is not "IRiS".** §5 specifies
 "openWakeWord, trained on 'IRiS'". No pre-trained model for that phrase exists
 publicly — the official repo bundles six words and the 241-model Home Assistant

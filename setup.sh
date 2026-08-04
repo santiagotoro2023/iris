@@ -115,6 +115,29 @@ add_env() {
   log "  .env: added $1"
 }
 
+# Wake words that are not somebody's name (Santiago's requirement). The six models
+# bundled in the image are all names, so these come from the Home Assistant
+# community collection, ~200 KB each. Measured against our own voice: "computer"
+# scores 0.99 on its phrase and 0.001 on unrelated speech.
+WAKE_WORDS="computer:en/computer/computer_v2.onnx
+ok_computer:en/ok_computer/ok_computer.onnx
+ok_home:en/ok_home/ok_home.onnx
+hey_house:en/hey_house/hey_house.onnx"
+WAKE_REPO="https://raw.githubusercontent.com/fwartner/home-assistant-wakewords-collection/main"
+
+ensure_wakewords() {
+  local name path
+  while IFS=: read -r name path; do
+    [ -n "$name" ] || continue
+    [ -f "data/wakewords/$name.onnx" ] && continue
+    log "  fetching wake word '$name'..."
+    curl -sfL "$WAKE_REPO/$path" -o "data/wakewords/$name.onnx" \
+      || warn "Could not fetch the '$name' wake word; the bundled ones still work."
+  done <<EOF
+$WAKE_WORDS
+EOF
+}
+
 # SearXNG needs a secret in its config file. Generated here so it never enters the repo.
 ensure_searxng() {
   local cfg=data/searxng/settings.yml
@@ -192,6 +215,7 @@ install() {
   setup_tailscale
   ensure_env
   ensure_searxng
+  ensure_wakewords
   log "Building and starting services..."
   dc up -d --build
   wait_for_ollama

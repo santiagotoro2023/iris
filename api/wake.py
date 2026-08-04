@@ -92,11 +92,12 @@ settings.setting(
     description="Keep the microphone open and wait for the wake word. Off by default "
                 "because it holds the microphone for as long as the page is open.")
 settings.setting(
-    "voice.wake_model", type="string", enum=_wake_models, default="hey_jarvis",
+    "voice.wake_model", type="string", enum=_wake_models, default="computer",
     title="Wake word",
     description="Which phrase wakes IRiS. There is no public model for 'IRiS' yet, so "
-                "the bundled words are stand-ins; a trained one dropped into "
-                "data/wakewords appears here on its own.")
+                "the default is 'computer': not somebody's name, and it scores 0.99 on "
+                "its own phrase against 0.001 on unrelated speech. A trained model "
+                "dropped into data/wakewords appears here on its own.")
 settings.setting(
     "voice.wake_sensitivity", type="number", minimum=0.1, maximum=0.95, default=0.5,
     title="Wake word sensitivity",
