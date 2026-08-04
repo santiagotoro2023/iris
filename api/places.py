@@ -262,6 +262,14 @@ async def journey(origin: str, destination: str, when: str | None = None,
     if not connections:
         return f"No connections found from {origin} to {destination}."
 
+    # What the timetable actually resolved the names to, not what was typed. It
+    # matched "SIDMAR AG" to "Mönchaltorf, Esslingerstr. 32" correctly, but labelled
+    # the route with the input, so a right answer looked like a wrong one and a
+    # genuinely wrong match would have been invisible.
+    first = connections[0]
+    origin = (first.get("from", {}).get("station", {}).get("name") or origin)
+    destination = (first.get("to", {}).get("station", {}).get("name") or destination)
+
     heading = f"{origin} to {destination}"
     if date or clock:
         heading += (f", to arrive by {clock or 'then'}" if arrive_by
@@ -384,6 +392,26 @@ async def _place_name(lat: float, lon: float) -> str:
     return _reverse_cache[key]
 
 
+def fix_age_seconds() -> float | None:
+    taken = settings.get("location.fixed_at")
+    return (time.time() - taken) if taken else None
+
+
+def _fix_note() -> str:
+    """Said out loud when the position is old or coarse, so a wrong stop is
+    explained rather than mysterious."""
+    age = fix_age_seconds()
+    accuracy = settings.get("location.accuracy")
+    bits = []
+    if age is not None and age > 600:
+        bits.append(f"the fix is {int(age // 60)} minutes old")
+    elif age is None:
+        bits.append("the fix has no timestamp, so it may be old")
+    if accuracy and accuracy > 500:
+        bits.append(f"accurate only to about {int(accuracy)} m")
+    return ("Position: " + ", and ".join(bits) + ".") if bits else ""
+
+
 def _fixed_coordinates() -> tuple[float, float] | None:
     """Only trust a stored fix if it is actually set; 0,0 is in the Atlantic."""
     lat = settings.get("location.latitude")
@@ -499,6 +527,12 @@ async def route_to(place: str, when: str = "", arrive_by: bool = False) -> str:
 
     origin = await nearest_stop() or settings.get("location.home")
     if origin:
+        if not settings.get("location.stop"):
+            note = _fix_note()
+            lines.append(f"Starting from {origin}, the closest stop to your position."
+                         + (f" {note}" if note else "")
+                         + " Set a preferred stop in Settings if that is not the one "
+                           "you use.")
         lines.append("")
         lines.append(await journey(origin, destination, when, arrive_by))
     lines.append(f"- On the map: https://www.google.com/maps/search/"
@@ -506,16 +540,38 @@ async def route_to(place: str, when: str = "", arrive_by: bool = False) -> str:
     return "\n".join(lines)
 
 
-async def _search_once(query: str) -> dict | None:
+# Roughly 65 km around the fix. Wide enough for a day out, narrow enough that a
+# company name cannot resolve to another continent.
+SEARCH_BOX_DEGREES = 0.6
+
+
+def _viewbox() -> str | None:
+    coords = _fixed_coordinates()
+    if not coords:
+        return None
+    lat, lon = coords
+    d = SEARCH_BOX_DEGREES
+    return f"{lon - d},{lat - d},{lon + d},{lat + d}"
+
+
+async def _search_once(query: str, near: bool = True) -> dict | None:
+    """`near` restricts the search to a box around the user.
+
+    Without it "SIDMAR AG" resolved to Sidmar, Frederick County, Maryland, and the
+    route was planned to the United States.
+    """
+    params = {"q": query, "format": "json", "limit": 1, "addressdetails": 1}
+    box = _viewbox() if near else None
+    if box:
+        params["viewbox"] = box
+        params["bounded"] = 1
     async with _nominatim_lock:
         global _last_nominatim
         wait = NOMINATIM_MIN_INTERVAL - (time.monotonic() - _last_nominatim)
         if wait > 0:
             await asyncio.sleep(wait)
         async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.get(NOMINATIM_URL,
-                            params={"q": query, "format": "json",
-                                    "limit": 1, "addressdetails": 1},
+            r = await c.get(NOMINATIM_URL, params=params,
                             headers={"User-Agent": USER_AGENT})
         _last_nominatim = time.monotonic()
     results = r.json() if r.status_code == 200 else []
@@ -530,17 +586,24 @@ async def _lookup(query: str) -> dict | None:
     company names. And appending the user's home town to a full address made it
     match nothing at all, so the region is only added last.
     """
-    tried = []
     parts = [p.strip() for p in query.split(",") if p.strip()]
-    tried.append(query)
-    # Drop the leading component, which is usually the business name.
-    if len(parts) > 1:
-        tried.append(", ".join(parts[1:]))
+    simpler = ", ".join(parts[1:]) if len(parts) > 1 else ""
     where = settings.get("location.home") or settings.get("location.region")
+
+    # Near first, always. Somewhere far away is the last thing meant by "how do I
+    # get there", so a global match is only accepted when nothing local exists.
+    attempts = [(query, True)]
+    if simpler:
+        attempts.append((simpler, True))
     if where:
-        tried.append(f"{query} {where}".strip())
-    for attempt in tried:
-        hit = await _search_once(attempt)
+        attempts.append((f"{query} {where}".strip(), False))
+        if simpler:
+            attempts.append((f"{simpler} {where}".strip(), False))
+    # No unbounded fallback on the raw query: that is what resolved "SIDMAR AG" to
+    # Sidmar, Maryland. Nothing local means nothing local, and saying so beats
+    # routing to another continent.
+    for attempt, near in attempts:
+        hit = await _search_once(attempt, near)
         if hit:
             return hit
     return None
@@ -610,8 +673,9 @@ async def whereabouts() -> str:
     accuracy = settings.get("location.accuracy")
     lines = [f"Location: {name or 'unknown'} ({lat}, {lon})"
              + (f", accurate to about {int(accuracy)} m." if accuracy else ".")]
-    if accuracy > 500:
-        lines.append("That fix is coarse, so treat the nearest stop as approximate.")
+    stale = _fix_note()
+    if stale:
+        lines.append(stale)
     if stop:
         preferred = settings.get("location.stop")
         lines.append(f"Departure stop: {stop}."

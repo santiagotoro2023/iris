@@ -1848,3 +1848,34 @@ certificate is generated on install, and Frigate starts under its profile when a
 camera exists. Two gaps found and closed on the uninstall side: `down` was not passing
 `--profile cameras`, so a running Frigate would have been left behind, and the wake
 word training image is built outside compose so `--rmi all` never saw it.
+
+
+## 51. Location Every Time, and Not on Another Continent
+
+Santiago: *"i want it to take location EVERY TIME its relevant so its always up to
+date and not a guess"*, after a route started from the wrong stop and the destination
+link pointed at Maryland.
+
+**"SIDMAR AG" resolved to Sidmar, Frederick County, Maryland.** The lookup cascade
+ended with an unbounded global attempt, so a company name the map does not hold
+matched the first thing anywhere on earth that looked like it. Searches are now
+restricted to a box around the user's position and the global fallback is gone
+entirely: nothing local means nothing local, and saying so beats routing to another
+continent.
+
+**The route was right and looked wrong.** The timetable had resolved "SIDMAR AG" to
+"Mönchaltorf, Esslingerstr. 32" correctly, but the output was labelled with the input
+string, so a correct answer read as a guess. Both ends now report the names the
+timetable actually resolved, which also makes a genuinely wrong match visible instead
+of silent.
+
+**The fix is taken fresh.** The browser volunteers a position before every message
+with no cached value accepted at all, and the wait is up to nine seconds rather than
+two and a half, because a real GPS fix takes a moment and a cached one is exactly what
+makes the nearest stop wrong. Where the position is old or coarse, the tools say so
+rather than presenting it as certain, and where no preferred stop is set they name the
+stop they chose and why.
+
+The honest limit: a desktop without GPS positions itself by wifi and will drift by a
+village. The preferred stop setting exists for that, and no amount of asking the
+browser more often fixes it.

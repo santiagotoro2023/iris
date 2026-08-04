@@ -911,9 +911,10 @@ async function sendMessage() {
   box.style.height = "auto";
 
   // A fix taken now, so "the next bus" starts from here rather than from wherever
-  // the page was opened. Bounded, so a slow or refused fix never blocks a message.
+  // the page was opened. GPS can take a few seconds, so wait properly for it; the
+  // cap only exists so a refused or broken sensor cannot hold a message forever.
   await Promise.race([refreshLocation(),
-                      new Promise(r => setTimeout(r, 2500))]);
+                      new Promise(r => setTimeout(r, 9000))]);
 
   const log = $("#chat-log");
   const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
@@ -1014,7 +1015,7 @@ async function sendMessage() {
 /* The server cannot ask the browser where it is, so the browser volunteers: on load
    and before a message, throttled. Without this the stored fix is wherever you were
    when you last pressed the button, which is the wrong answer for "the next bus". */
-const LOCATION_MAX_AGE_MS = 120000;
+const LOCATION_MAX_AGE_MS = 60000;
 let lastFix = 0;
 
 function refreshLocation({force = false} = {}) {
@@ -1031,7 +1032,9 @@ function refreshLocation({force = false} = {}) {
       } catch { /* a stale fix beats no reply */ }
       resolve();
     }, () => resolve(),
-       {enableHighAccuracy: true, timeout: 8000, maximumAge: 60000});
+       // No cached position at all: a stale one is exactly what makes the nearest
+       // stop wrong, and that is the thing being asked about.
+       {enableHighAccuracy: true, timeout: 9000, maximumAge: 0});
   });
 }
 
