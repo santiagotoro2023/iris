@@ -35,8 +35,19 @@ RUN pip3 install --no-cache-dir --no-deps openwakeword==0.6.0 \
  && python3 -c "import openwakeword.utils as u; u.download_models()"
 
 # The synthetic voice generator that produces the positive examples.
-RUN git clone --depth 1 https://github.com/rhasspy/piper-sample-generator /opt/piper-sample-generator \
+#
+# dscripka's fork, NOT rhasspy's: openWakeWord's train.py does
+# `from generate_samples import generate_samples`, and upstream rhasspy has since
+# moved that module into a package, so the notebook's own clone command no longer
+# satisfies its own trainer. The fork keeps the flat layout train.py expects.
+RUN git clone --depth 1 https://github.com/dscripka/piper-sample-generator /opt/piper-sample-generator \
  && wget -q -O /opt/piper-sample-generator/models/en_US-libritts_r-medium.pt \
       https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt
+
+# The fork phonemises through espeak-ng rather than piper-phonemize. Appended as its
+# own layer, after the clone, so none of the cached layers above are invalidated.
+RUN apt-get update && apt-get install -y --no-install-recommends libespeak-ng1 \
+    && rm -rf /var/lib/apt/lists/* \
+ && pip3 install --no-cache-dir espeak-phonemizer==1.3.0
 
 WORKDIR /work

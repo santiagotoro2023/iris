@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import auth
 import main
 import persona
+import places
 import reasoning
 import settings
 import backup
@@ -429,6 +430,32 @@ def test_compaction_expires_old_transcripts_and_nothing_else():
     r, result = asyncio.run(scenario(0))
     assert result["removed"] == 0
     assert len(asyncio.run(r.hgetall(chat._index_key(7)))) == 5
+
+
+def test_home_and_work_resolve_to_configured_places():
+    """SPEC.md 8 had "home/work addresses" as an ASK USER. They are settings instead,
+    so the two words a person actually uses work without asking him anything."""
+    with patch.dict(settings._overrides, {"location.home": "Winterthur",
+                                          "location.work": "Zurich HB"}):
+        assert places.resolve("home") == "Winterthur"
+        assert places.resolve("Home") == "Winterthur"
+        assert places.resolve("the office") == "Zurich HB"
+        assert places.resolve("Bern") == "Bern"      # a real place is left alone
+    # Unconfigured must fall through to the literal word, never to an empty query,
+    # which the transit API answers with every station in the country.
+    with patch.dict(settings._overrides, {"location.home": ""}):
+        assert places.resolve("home") == "home"
+
+
+def test_journey_duration_is_readable_aloud():
+    """The API returns '00d00:19:00', which is unspeakable (SPEC.md 17)."""
+    assert places._minutes("00d00:19:00") == "19 min"
+    assert places._minutes("00d01:05:00") == "1h 05"
+    assert places._minutes("00d02:00:00") == "2h 00"
+    # Anything without the expected shape degrades to "?" rather than being read out.
+    assert places._minutes(None) == "?"
+    assert places._minutes("nonsense") == "?"
+    assert places._minutes("00dxx:yy:00") == "00dxx:yy:00"   # shaped but unparseable
 
 
 def test_camera_passwords_are_never_exposed():

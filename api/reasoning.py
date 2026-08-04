@@ -101,6 +101,50 @@ async def _recall(query: str):
     return "\n".join(f"- {h['text']}" for h in hits)
 
 
+@tool("transit",
+      "Public transport times between two places in Switzerland. Accepts station "
+      "names, addresses, and the words 'home' and 'work', which resolve to the "
+      "configured addresses.",
+      {"type": "object",
+       "properties": {
+           "origin": {"type": "string", "description": "Where the journey starts."},
+           "destination": {"type": "string", "description": "Where it ends."},
+           "when": {"type": "string",
+                    "description": "Optional departure time as HH:MM. Omit for now."}},
+       "required": ["origin", "destination"]})
+async def _transit(origin: str, destination: str, when: str = ""):
+    import places
+    return await places.journey(origin, destination, when or None)
+
+
+@tool("departures",
+      "The next departures from a Swiss station, as on the board at the platform. "
+      "Use this when asked what is leaving soon rather than for a specific journey.",
+      {"type": "object",
+       "properties": {"station": {"type": "string",
+                                  "description": "Station or stop name, or 'home'."}},
+       "required": ["station"]})
+async def _departures(station: str):
+    import places
+    return await places.departures(station)
+
+
+@tool("find_place",
+      "Find shops, restaurants, amenities and addresses on the map. Use this for "
+      "'where is the nearest X' questions rather than searching the web.",
+      {"type": "object",
+       "properties": {
+           "query": {"type": "string",
+                     "description": "What to look for, e.g. 'pharmacy', 'hardware "
+                                    "shop', 'Bahnhofstrasse 12'."},
+           "near": {"type": "string",
+                    "description": "Optional town or address to search around."}},
+       "required": ["query"]})
+async def _find_place(query: str, near: str = ""):
+    import places
+    return await places.find_place(query, near)
+
+
 @tool("look_at_camera",
       "Look at what a home camera can see right now and describe it. Use this "
       "whenever asked what is happening somewhere in the house, whether anyone is at "
@@ -255,7 +299,9 @@ async def stream(messages: list[dict], model: str | None = None,
              if not (name == "web_search" and policy == "off")
              and not (name in ("remember", "recall") and memory_off)
              and not (name == "look_at_camera"
-                      and not settings.get("cameras.enabled"))]
+                      and not settings.get("cameras.enabled"))
+             and not (name in ("transit", "departures", "find_place")
+                      and not settings.get("location.enabled"))]
 
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):

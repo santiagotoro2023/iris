@@ -26,6 +26,7 @@ import chat
 import files
 import memory
 import persona
+import places
 import reasoning
 import settings
 import voice
@@ -117,6 +118,7 @@ app.include_router(wake.router)
 app.include_router(memory.router)
 app.include_router(backup.router)
 app.include_router(cameras.router)
+app.include_router(places.router)
 
 
 class InferRequest(BaseModel):
