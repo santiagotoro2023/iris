@@ -49,12 +49,15 @@ services:
       IRIS_VISION_MODEL: ${IRIS_VISION_MODEL:-qwen2.5vl:3b}
       IRIS_EMBED_MODEL: ${IRIS_EMBED_MODEL:-bge-m3}
       QDRANT_URL: http://qdrant:6333
+      IRIS_BACKUP_KEY: ${IRIS_BACKUP_KEY:-}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-}
       IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-0}
     volumes:
       # Custom wake word models only. The bundled ones live in the image.
       - ./data/wakewords:/wakewords
+      # Encrypted archives. Gitignored: this repo is public (SPEC.md 4).
+      - ./backup:/backup
     depends_on:
       ollama:
         condition: service_started

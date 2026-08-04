@@ -149,7 +149,7 @@ ensure_searxng() {
 }
 
 ensure_env() {
-  mkdir -p "${DATA_DIRS[@]}"
+  mkdir -p "${DATA_DIRS[@]}" backup
   have openssl || die "openssl is required to generate the database password."
   if [ ! -f .env ]; then
     log "Creating .env with a random database password..."
@@ -164,6 +164,9 @@ ensure_env() {
   add_env IRIS_EMBED_MODEL "$EMBED_DEFAULT"
   add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
   add_env IRIS_THINK ""
+  # Without this key every archive is unreadable, so it is generated once and then
+  # never regenerated: add_env leaves an existing value alone.
+  add_env IRIS_BACKUP_KEY "$(openssl rand -hex 32)"
 }
 
 wait_for_ollama() {
@@ -246,6 +249,7 @@ uninstall() {
   if [ "${PURGE:-0}" != 1 ]; then
     log "Kept ./data and .env."
     echo "  ./data holds all of IRiS's memory (Postgres, Qdrant, models, media)"
+    echo "  and ./backup holds the encrypted archives. Neither is touched here."
     echo "  and any wake word models you trained, in ./data/wakewords."
     [ -d data/wakeword-training ] && echo "  Wake word training data is still there too:  ./wakeword/train.sh --clean"
     echo "  To remove those too:  ./setup.sh --uninstall --purge"
@@ -258,6 +262,7 @@ uninstall() {
   read -r -p "Type DELETE to confirm: " reply
   [ "$reply" = "DELETE" ] || die "Aborted — nothing was deleted."
   rm -rf data .env
+  [ -d backup ] && warn "./backup was KEPT: it is the only copy left. Delete it by hand if you mean to."
   log "Purged ./data and .env."
   echo "  Left alone deliberately: Docker itself, the NVIDIA Container Toolkit,"
   echo "  /etc/cdi/nvidia.yaml and Tailscale — other software on this host may"

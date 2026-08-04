@@ -1096,3 +1096,55 @@ tool that cannot work will call it anyway and then explain the error to the user
 - Nightly compaction enforcing the 30-day rolling raw retention.
 - **ASK USER, unchanged:** where encrypted Postgres and Qdrant exports should go.
   Proxmox Backup Server, a NAS, an external drive, or cloud storage.
+
+## 26. Backups
+
+Santiago, verbatim:
+
+> The backups should be in the repository in a 'backup' folder of some kind, you
+> chose the most elegant solution.
+
+Built as `./backup/`, beside `./data/`, and **gitignored**. §4 fixes this repo as
+public with "secrets/credentials/personal data never committed", and an archive of
+every conversation and memory is precisely that. "In the repository" is therefore
+read as the repository *directory* on disk, never the git history.
+
+**One flag raised, and it stands.** §6 Phase 3 asks for a target *outside*
+stzrhws01, because the point is surviving that machine failing, and a folder on it
+does not. The instruction was explicit so it is built as asked; because the target is
+an ordinary directory, an rsync to a NAS, a Tailscale copy to another node or an
+external drive covers the gap without changing anything here.
+
+**What is in it.** All three stores, or the backup is worthless: Postgres via
+`pg_dump` (accounts, settings, audit log), Qdrant via its own snapshot API
+(memories), Redis as our own JSON (conversations). Sessions are deliberately excluded
+— restoring a month-old login token is a liability, not a feature.
+
+**Encryption with no new dependency.** AES-256-CBC, PBKDF2 at 200,000 iterations,
+via the `openssl` binary that `setup.sh` already requires for generating the database
+password. A restore therefore needs nothing that is not on every Linux box. The key
+is `IRIS_BACKUP_KEY`, generated once into `.env` by `setup.sh`; `add_env` never
+overwrites an existing value, because regenerating it would silently orphan every
+archive already written.
+
+**Stateless scheduling.** Rather than remembering when it last ran, the scheduler
+asks the backup directory whether today already has an archive. A restart cannot
+cause a double run, and a machine that was off overnight backs up as soon as it is
+on rather than skipping the day. Checked once a minute so a change to the time in
+the UI takes effect immediately.
+
+**Pruning happens only after a successful archive**, so a failing backup can never
+eat the history it was supposed to protect.
+
+**`restore.sh` exists because a backup that has never been restored is theatre.**
+Verified end to end: three memories stored, archive taken, the entire Qdrant
+collection deleted, restored from inside the encrypted archive, three memories back.
+
+**Path traversal.** The delete endpoint takes a filename from the client, so it is
+reduced to its basename and must match the archive prefix and suffix; a test asserts
+that `../../etc/passwd` and friends cannot escape.
+
+### Still open in Phase 3
+
+Raw conversation ingestion, diarization, and the nightly compaction enforcing the
+30-day rolling raw retention.

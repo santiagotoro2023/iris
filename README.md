@@ -163,6 +163,38 @@ shorter than three words skip recall entirely, because a two-word fragment score
 > enforces the 30-day raw retention, and the encrypted off-machine backup. The backup
 > destination is an open question in [SPEC.md](./SPEC.md).
 
+## Backups
+
+Everything IRiS knows lives in three places, so a backup is all three or it is
+worthless: **Postgres** (accounts, settings, audit log), **Qdrant** (memories) and
+**Redis** (conversations). One encrypted archive a day, at 03:00 by default, lands in
+**`./backup/`**.
+
+```
+./restore.sh --list          what is available
+./restore.sh                 restore the most recent
+./restore.sh backup/iris-... restore a specific one
+```
+
+Archives are AES-256-CBC with PBKDF2, using `IRIS_BACKUP_KEY` from `.env`. `openssl`
+was already required by `setup.sh` to generate the database password, so this adds no
+dependency and a restore needs nothing that is not on any Linux box. Time, retention
+count and whether to include conversations are all settings; the Memory tab has a
+*back up now* button and lists what exists.
+
+> **`./backup/` is gitignored, deliberately.** This repo is public
+> ([SPEC.md §4](./SPEC.md)) and an archive of every conversation and memory is exactly
+> what must never be committed. The folder lives beside `./data/`, not in git.
+
+> **Two warnings worth taking seriously.**
+> **`IRIS_BACKUP_KEY` is not in the backup.** It is in `.env`, which is also
+> gitignored. Lose `.env` and every archive is permanently unreadable, so keep a copy
+> of that key somewhere else.
+> **This is one machine.** Phase 3 asks for an off-machine copy, and a folder on
+> stzrhws01 does not survive stzrhws01 dying. Because it is a plain directory, any
+> sync you like covers that: an rsync cron to a NAS, a Tailscale copy to another
+> node, or an external drive.
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,

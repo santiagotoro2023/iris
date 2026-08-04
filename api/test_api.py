@@ -14,6 +14,7 @@ import main
 import persona
 import reasoning
 import settings
+import backup
 import memory
 import voice
 
@@ -315,6 +316,43 @@ def test_memory_tools_are_hidden_when_they_cannot_work():
 
 async def _none():
     return ""
+
+
+def test_backup_delete_cannot_escape_the_backup_directory():
+    """The filename comes from the client, so a crafted one must not walk out."""
+    import asyncio
+    for evil in ["../../etc/passwd", "/etc/passwd", "iris-x", "notes.txt",
+                 "../.env", "iris-../../../etc/shadow.tar.gz.enc"]:
+        try:
+            asyncio.run(backup.delete(evil, {"username": "t"}))
+        except Exception as e:
+            assert getattr(e, "status_code", None) == 400, (evil, e)
+            continue
+        # Anything accepted must have resolved to a plain name inside BACKUP_DIR.
+        resolved = (backup.BACKUP_DIR / __import__("pathlib").Path(evil).name)
+        assert resolved.parent == backup.BACKUP_DIR, evil
+        assert resolved.name.startswith(backup.PREFIX), evil
+
+
+def test_backup_prunes_only_the_oldest_beyond_the_limit(tmp_path=None):
+    """Pruning is what deletes real data, so the ordering must be right: newest
+    first, and only entries past the keep count are ever touched."""
+    import pathlib
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        old = backup.BACKUP_DIR
+        try:
+            backup.BACKUP_DIR = pathlib.Path(d)
+            names = [f"{backup.PREFIX}2026080{i}-000000{backup.SUFFIX}"
+                     for i in range(1, 6)]
+            for n in names:
+                (backup.BACKUP_DIR / n).write_bytes(b"x")
+            (backup.BACKUP_DIR / "unrelated.txt").write_bytes(b"x")
+            found = [p.name for p in backup.archives()]
+            assert found == sorted(names, reverse=True), found
+            assert "unrelated.txt" not in found
+        finally:
+            backup.BACKUP_DIR = old
 
 
 def test_web_search_tool_is_registered():

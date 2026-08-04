@@ -4,6 +4,7 @@ Everything routes through here — nothing talks to Ollama directly (SPEC.md Pha
 Runtime configuration comes from the settings service, never from a file the user
 cannot reach (SPEC.md 3.1).
 """
+import asyncio
 import hashlib
 import os
 import time
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 import activity
 import auth
+import backup
 import chat
 import files
 import memory
@@ -83,6 +85,7 @@ async def lifespan(app: FastAPI):
     await auth.init()
     await activity.init()
     await chat.init()
+    asyncio.create_task(backup.scheduler())
     yield
 
 
@@ -109,6 +112,7 @@ app.include_router(files.router)  # same
 # dependency, so the listener authenticates itself inside the handler.
 app.include_router(wake.router)
 app.include_router(memory.router)
+app.include_router(backup.router)
 
 
 class InferRequest(BaseModel):

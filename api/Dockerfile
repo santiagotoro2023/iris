@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /app
+# pg_dump for backups; openssl (already present) encrypts the archive.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir \
       fastapi==0.115.6 httpx==0.28.1 \
       "psycopg[binary]==3.2.3" jsonschema==4.23.0 redis==5.2.1 \
@@ -20,6 +23,6 @@ RUN pip install --no-cache-dir \
  && python -c "import openwakeword.utils as u; u.download_models()"
 
 COPY main.py settings.py auth.py reasoning.py persona.py activity.py chat.py \
-     voice.py files.py wake.py memory.py ./
+     voice.py files.py wake.py memory.py backup.py ./
 COPY static ./static
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
