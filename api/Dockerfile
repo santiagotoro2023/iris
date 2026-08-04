@@ -20,6 +20,6 @@ RUN pip install --no-cache-dir \
  && python -c "import openwakeword.utils as u; u.download_models()"
 
 COPY main.py settings.py auth.py reasoning.py persona.py activity.py chat.py \
-     voice.py files.py wake.py ./
+     voice.py files.py wake.py memory.py ./
 COPY static ./static
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

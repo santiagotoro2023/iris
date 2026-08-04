@@ -136,6 +136,33 @@ The pieces live in `api/static/app.js` (`Combo`, `Stepper`, `Toggle`) and are sh
 by every page; the combobox filters, which is what makes a 486-entry timezone list
 usable. Phase 5's React app should port these, not reintroduce native controls.
 
+## Memory
+
+IRiS remembers things between conversations. Facts are embedded with **bge-m3**
+(multilingual, so it works across English and German) and stored in Qdrant. Two
+paths use them:
+
+- **Automatic recall.** Every turn is searched against the store and anything
+  relevant is folded into the system prompt before the model sees the question.
+  This is what makes memory actually work; leaving it to the model to *decide* to
+  search means it mostly does not.
+- **A `remember` tool**, so IRiS can deliberately store something it just learned,
+  and a `recall` tool for digging out an older detail.
+
+A near-identical fact replaces the existing one rather than piling up copies. The
+**Memory** tab lists everything remembered, searches it, and lets you add or forget
+entries by hand.
+
+Measured with bge-m3 on full-sentence questions: genuine matches score down to 0.43
+and unrelated ones up to 0.37, so the recall threshold defaults to 0.42. The bands
+are close, so it is worth tuning by eye once there are real memories in there. Turns
+shorter than three words skip recall entirely, because a two-word fragment scores
+~0.44 against almost anything and would drag in the whole store.
+
+> Not yet built: raw conversation ingestion, diarization, the nightly compaction that
+> enforces the 30-day raw retention, and the encrypted off-machine backup. The backup
+> destination is an open question in [SPEC.md](./SPEC.md).
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,

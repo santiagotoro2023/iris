@@ -39,6 +39,7 @@
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true"  data-view="chat">Chat</button>
     <button class="tab" role="tab" aria-selected="false" data-view="conversations">Conversations</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="memory">Memory</button>
     <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
   </nav>
@@ -92,6 +93,22 @@
     </div>
   </section>
 
+  <section class="view" id="view-memory" role="tabpanel">
+    <div class="panel">
+      <h2>What IRiS remembers</h2>
+      <div class="mem-add">
+        <input class="input" id="mem-search" type="text" placeholder="Search memories…"
+               aria-label="Search memories">
+      </div>
+      <div class="mem-add">
+        <input class="input" id="mem-new" type="text" placeholder="Teach it something…"
+               aria-label="New memory">
+        <button class="btn" id="mem-save" type="button">Remember</button>
+      </div>
+      <div id="mem-list"><div class="empty">loading…</div></div>
+    </div>
+  </section>
+
   <section class="view" id="view-settings" role="tabpanel">
     <div id="groups"></div>
   </section>
@@ -117,6 +134,7 @@ document.querySelectorAll(".tab").forEach(tab => {
     document.querySelectorAll(".view").forEach(v =>
       v.classList.toggle("active", v.id === "view-" + tab.dataset.view));
     if (tab.dataset.view === "activity") loadActivity();
+    if (tab.dataset.view === "memory") loadMemories();
   });
 });
 
@@ -989,6 +1007,56 @@ $("#hands-free").addEventListener("click", async () => {
 });
 // Release the microphone when the page goes away, without turning the setting off.
 window.addEventListener("pagehide", stopHandsFree);
+
+/* -------------------------------------------------------------- memory -- */
+async function loadMemories() {
+  const q = $("#mem-search").value.trim();
+  const list = $("#mem-list");
+  const {memories} = await json("memory" + (q ? "?q=" + encodeURIComponent(q) : ""));
+  list.textContent = "";
+  if (!memories.length) {
+    list.append(el("div", "empty", q ? "Nothing matches." : "Nothing remembered yet."));
+    return;
+  }
+  for (const m of memories) {
+    const row = el("div", "mem-row");
+    row.append(el("div", "mem-text", m.text));
+    const meta = el("div", "mem-meta");
+    // A score only exists on a search result; showing "0" on the full list would lie.
+    if (m.score !== undefined) meta.append(el("span", "mem-score", m.score.toFixed(2)));
+    if (m.created) meta.append(el("span", null, new Date(m.created * 1000)
+      .toLocaleDateString(undefined, {day: "2-digit", month: "short", year: "numeric"})));
+    meta.append(el("span", "mem-kind", m.source || m.kind || "fact"));
+    const del = el("button", "ghost", "forget");
+    del.type = "button";
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      await json("memory/" + encodeURIComponent(m.id), {method: "DELETE"});
+      loadMemories();
+    });
+    meta.append(del);
+    row.append(meta);
+    list.append(row);
+  }
+}
+
+$("#mem-save").addEventListener("click", async () => {
+  const box = $("#mem-new");
+  if (!box.value.trim()) return;
+  $("#mem-save").disabled = true;
+  try { await send("memory", {text: box.value.trim()}, "POST"); box.value = ""; }
+  catch (e) { $("#mem-list").prepend(el("div", "empty", "Could not save: " + e.message)); }
+  $("#mem-save").disabled = false;
+  loadMemories();
+});
+$("#mem-new").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); $("#mem-save").click(); }
+});
+let memSearchTimer;
+$("#mem-search").addEventListener("input", () => {
+  clearTimeout(memSearchTimer);
+  memSearchTimer = setTimeout(loadMemories, 300);
+});
 
 async function loadConversations({selectLatest = false} = {}) {
   const convs = await json("chat/conversations");

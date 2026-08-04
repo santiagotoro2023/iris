@@ -338,3 +338,16 @@ button { font: inherit; color: inherit; }
   .msg { max-width: 92%; }
   .tab { padding: .5rem .6rem; font-size: .66rem; }
 }
+
+/* ------------------------------------------------------------- memory --- */
+.mem-add { display: flex; gap: .5rem; margin-bottom: .7rem; }
+.mem-add .input { flex: 1; }
+.mem-row { display: grid; gap: .35rem; padding: .6rem .8rem;
+           border-bottom: 1px solid var(--line); }
+.mem-row:last-child { border-bottom: 0; }
+.mem-text { line-height: 1.45; }
+.mem-meta { display: flex; align-items: center; gap: .7rem; font-family: var(--mono);
+            font-size: .7rem; color: var(--dim); }
+.mem-meta .ghost { margin-left: auto; padding: .15rem .5rem; font-size: .68rem; }
+.mem-kind { border: 1px solid var(--line); padding: 0 .35rem; }
+.mem-score { color: var(--orange); }

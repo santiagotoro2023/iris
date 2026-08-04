@@ -47,6 +47,8 @@ services:
       SEARXNG_URL: http://searxng:8080
       IRIS_MODEL: ${IRIS_MODEL:-qwen3:8b}
       IRIS_VISION_MODEL: ${IRIS_VISION_MODEL:-qwen2.5vl:3b}
+      IRIS_EMBED_MODEL: ${IRIS_EMBED_MODEL:-bge-m3}
+      QDRANT_URL: http://qdrant:6333
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-}
       IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-0}
@@ -55,6 +57,8 @@ services:
       - ./data/wakewords:/wakewords
     depends_on:
       ollama:
+        condition: service_started
+      qdrant:
         condition: service_started
       redis:
         condition: service_started

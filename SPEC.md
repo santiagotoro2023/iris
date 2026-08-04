@@ -1038,3 +1038,61 @@ Piper en_GB voices the training never saw, plus negatives that deliberately incl
 to the thing on Saturday". The gap between the columns is the whole result; a model
 is only usable if the weakest positive clears 0.5 while the worst negative stays
 under 0.3.
+
+## 25. Phase 3 Part One — Memory
+
+Delivers the parts of Phase 3 that were never blocked: embedding, storage, recall
+and the Memory tab §14 asked for. The **backup destination is still an open ASK
+USER**, and raw ingestion depends on decisions that follow from it.
+
+**Two paths, and the second is the one that matters.** A `remember` tool lets IRiS
+deliberately store something, but automatic recall is what makes memory work: every
+user turn is embedded, searched, and anything relevant is folded into the system turn
+before the model sees the question. Leaving retrieval to a `recall` tool alone would
+mean an 8B model mostly never calls it.
+
+**No new dependency.** Qdrant speaks plain HTTP and httpx is already in the image, so
+there is no client library. Embeddings come from Ollama, which is already running, so
+bge-m3 is a model pull rather than a service.
+
+**Thresholds are measured, not guessed.** The first draft used 0.55 and silently
+dropped half the genuine recalls. Measured against a real store:
+
+| query | score of the memory that should match |
+|---|---|
+| "should I use emojis" | 0.589 |
+| "what hardware does he have" | 0.563 |
+| "what GPU is in the machine" | 0.541 |
+| "where does he work" | 0.534 |
+| "who employs him" | 0.518 |
+| "how should I write to him" | 0.434 |
+
+against unrelated questions topping out at 0.368 ("explain TCP handshakes"). The
+default is 0.42. The bands are narrow and this is a calibration knob, not a constant,
+which is why it is a setting.
+
+**Short turns skip recall entirely.** bge-m3 scores a two-word fragment at ~0.44
+against almost anything, well inside the range a real match occupies, so "the
+weather" pulled in every memory stored. Turns under three words do not reach the
+store, and they are also the ones least likely to need it.
+
+**Dedup on write.** A new memory scoring above 0.93 against an existing one replaces
+it rather than stacking a near-identical copy. Verified: storing four facts where two
+are paraphrases leaves three.
+
+**Failure is silent by design.** Memory is an enhancement to a reply, so a cold
+Qdrant or a missing embedding model returns nothing rather than breaking the turn.
+The one loud failure is a dimension mismatch, which happens if the embedding model is
+changed under an existing store; that says so explicitly rather than returning
+nonsense.
+
+**Tools are withheld when they cannot work.** With no user in context, or memory
+switched off, `remember` and `recall` are not offered at all. An 8B model handed a
+tool that cannot work will call it anyway and then explain the error to the user.
+
+### Still open in Phase 3
+
+- Raw conversation ingestion, diarization (pyannote), chunking.
+- Nightly compaction enforcing the 30-day rolling raw retention.
+- **ASK USER, unchanged:** where encrypted Postgres and Qdrant exports should go.
+  Proxmox Backup Server, a NAS, an external drive, or cloud storage.

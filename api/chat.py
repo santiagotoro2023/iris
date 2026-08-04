@@ -107,7 +107,8 @@ async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
         yield json.dumps({"type": "start", "conversation_id": cid}) + "\n"
         final = None
         try:
-            async for event in reasoning.stream(history, think=body.think):
+            async for event in reasoning.stream(history, think=body.think,
+                                                user_id=uid):
                 if event["type"] == "done":
                     final = event
                 yield json.dumps(event) + "\n"

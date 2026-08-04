@@ -14,6 +14,7 @@ import main
 import persona
 import reasoning
 import settings
+import memory
 import voice
 
 # The API now requires a session. These tests exercise inference and settings logic,
@@ -257,6 +258,63 @@ def test_wake_models_never_returns_an_empty_dropdown():
     with patch.object(wake, "_bundled", lambda: {}), \
          patch.object(wake, "CUSTOM_DIR", "/nonexistent"):
         assert wake._wake_models()
+
+
+def test_short_turns_do_not_trigger_recall():
+    """bge-m3 scores a two-word fragment against almost anything inside the range a
+    real match occupies, so "the weather" would drag in every memory stored."""
+    import asyncio
+    called = []
+
+    async def boom(*a, **kw):
+        called.append(a)
+        return []
+
+    with patch.object(memory, "recall", boom):
+        assert asyncio.run(memory.context_for("hi", 1)) == ""
+        assert asyncio.run(memory.context_for("the weather", 1)) == ""
+        assert not called, "short turns must not even reach the store"
+        asyncio.run(memory.context_for("what am I running this on", 1))
+        assert called, "a real question must"
+
+
+def test_recalled_memories_are_offered_not_announced():
+    import asyncio
+    hits = [{"text": "Santiago runs IRiS on an RTX 3060 Ti."}]
+
+    async def fake(*a, **kw):
+        return hits
+
+    with patch.object(memory, "recall", fake):
+        ctx = asyncio.run(memory.context_for("what hardware is this", 1))
+    assert "RTX 3060 Ti" in ctx
+    assert "do not announce" in ctx.lower(), ctx
+
+
+def test_memory_tools_are_hidden_when_they_cannot_work():
+    """An 8B model offered a tool that cannot work will call it anyway, so the tool
+    is withheld rather than left to fail: no user to remember for, or memory off."""
+    import asyncio
+
+    def offered(**kw):
+        post = fake_ollama(text_round("hi"))
+        with patch("httpx.AsyncClient.stream", post):
+            asyncio.run(reasoning.run([{"role": "user", "content": "x"}], **kw))
+        return {t["function"]["name"] for t in post.sent[0]["tools"]}
+
+    anonymous = offered()
+    assert "remember" not in anonymous and "recall" not in anonymous, anonymous
+    assert "web_search" in anonymous, anonymous
+
+    with patch.dict(settings._overrides, {"memory.enabled": False}):
+        assert "remember" not in offered(user_id=1)
+
+    with patch.object(memory, "context_for", lambda *a, **k: _none()):
+        assert "remember" in offered(user_id=1)
+
+
+async def _none():
+    return ""
 
 
 def test_web_search_tool_is_registered():

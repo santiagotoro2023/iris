@@ -3,6 +3,8 @@
 Split out of main so both /infer and the chat view run exactly the same path —
 there is one place where IRiS thinks, not two that drift (SPEC.md Phase 1).
 """
+import contextvars
+import inspect
 import json
 import os
 import re
@@ -12,8 +14,13 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import HTTPException
 
+import memory
 import persona
 import settings
+
+# Tools that act on behalf of somebody read it from here, rather than every tool
+# signature growing a user argument the model would then try to fill in itself.
+CURRENT_USER = contextvars.ContextVar("current_user_id", default=None)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://searxng:8080")
@@ -54,6 +61,44 @@ def _current_time():
     tz = settings.get("general.timezone")
     now = datetime.now(ZoneInfo(tz))
     return now.strftime(f"%H:%M on %A, %d %B %Y ({tz}, 24-hour clock)")
+
+
+@tool("remember",
+      "Store something durable about the user that is worth knowing in future "
+      "conversations: a preference, a fact about them, their setup, a decision they "
+      "made. Do NOT store passing chat, questions, or things you merely looked up.",
+      {"type": "object",
+       "properties": {"text": {"type": "string",
+                               "description": "The fact, written as a standalone "
+                                              "sentence that will still make sense "
+                                              "months from now."}},
+       "required": ["text"]})
+async def _remember(text: str):
+    user_id = CURRENT_USER.get()
+    if user_id is None:
+        return "error: no user in context"
+    if not settings.get("memory.enabled"):
+        return "Memory is switched off."
+    out = await memory.remember(text, user_id, source="tool")
+    return "Updated what I knew." if out["replaced"] else "Remembered."
+
+
+@tool("recall",
+      "Search your memory for what you already know about the user. Automatic recall "
+      "already runs on every turn, so only use this when you need something specific "
+      "that was not surfaced, such as an older detail.",
+      {"type": "object",
+       "properties": {"query": {"type": "string",
+                                "description": "What you are trying to remember."}},
+       "required": ["query"]})
+async def _recall(query: str):
+    user_id = CURRENT_USER.get()
+    if user_id is None:
+        return "error: no user in context"
+    hits = await memory.recall(query, user_id, limit=8, min_score=0.35)
+    if not hits:
+        return f"Nothing remembered about {query!r}."
+    return "\n".join(f"- {h['text']}" for h in hits)
 
 
 @tool("web_search",
@@ -132,7 +177,7 @@ def resolve_think(explicit: bool | None) -> bool | None:
     return {"never": False, "always": True}.get(settings.get("llm.think"))
 
 
-def _run_tool(call: dict) -> tuple[str, str]:
+async def _run_tool(call: dict) -> tuple[str, str]:
     fn = call["function"]
     name = fn["name"]
     if name not in TOOLS:
@@ -140,13 +185,16 @@ def _run_tool(call: dict) -> tuple[str, str]:
     # A failing tool reports back to the model instead of 500ing the request, so it
     # can recover or explain rather than the whole turn dying.
     try:
-        return name, str(TOOLS[name][1](**fn.get("arguments", {})))
+        result = TOOLS[name][1](**fn.get("arguments", {}))
+        if inspect.isawaitable(result):          # memory tools reach the network
+            result = await result
+        return name, str(result)
     except Exception as e:
         return name, f"error: {e}"
 
 
 async def stream(messages: list[dict], model: str | None = None,
-                 think: bool | None = None):
+                 think: bool | None = None, user_id: int | None = None):
     """Run the tool-calling loop, yielding events as they happen.
 
     Nothing user-facing should wait for a whole response (SPEC.md 16), so this is the
@@ -158,6 +206,7 @@ async def stream(messages: list[dict], model: str | None = None,
     """
     messages = list(messages)
     think = resolve_think(think)
+    CURRENT_USER.set(user_id)
 
     # IRiS is a character, not a chat completion (SPEC.md 17). The persona is sent with
     # every request but kept OUT of the stored transcript, so editing it takes effect on
@@ -175,9 +224,20 @@ async def stream(messages: list[dict], model: str | None = None,
                 [system["content"], stamp, SEARCH_POLICY[policy],
                  "Never put a year in a search query unless the user asked about that "
                  "year, and never describe your answer as being 'as of' any year."])}
+            # Recall happens automatically. Leaving it to the model to decide to search
+            # its own memory means it mostly does not.
+            if user_id is not None and settings.get("memory.enabled"):
+                asked = next((m.get("content") or "" for m in reversed(messages)
+                              if m.get("role") == "user"), "")
+                recalled = await memory.context_for(asked, user_id)
+                if recalled:
+                    system = {**system,
+                              "content": system["content"] + "\n\n" + recalled}
 
+    memory_off = user_id is None or not settings.get("memory.enabled")
     tools = [schema for name, (schema, _) in TOOLS.items()
-             if not (name == "web_search" and policy == "off")]
+             if not (name == "web_search" and policy == "off")
+             and not (name in ("remember", "recall") and memory_off)]
 
     async with httpx.AsyncClient(timeout=600) as c:
         for _ in range(MAX_TOOL_HOPS):
@@ -227,7 +287,7 @@ async def stream(messages: list[dict], model: str | None = None,
                 fn = call.get("function", {})
                 yield {"type": "tool_start", "name": fn.get("name", "?"),
                        "arguments": fn.get("arguments", {})}
-                name, result = _run_tool(call)
+                name, result = await _run_tool(call)
                 messages.append({"role": "tool", "tool_name": name, "content": result})
                 yield {"type": "tool", "name": name, "content": result}
 
@@ -235,9 +295,9 @@ async def stream(messages: list[dict], model: str | None = None,
 
 
 async def run(messages: list[dict], model: str | None = None,
-              think: bool | None = None) -> dict:
+              think: bool | None = None, user_id: int | None = None) -> dict:
     """Collect `stream` to completion. Same path, so the two cannot drift."""
-    async for event in stream(messages, model=model, think=think):
+    async for event in stream(messages, model=model, think=think, user_id=user_id):
         if event["type"] == "done":
             return {"message": event["message"], "messages": event["messages"]}
         if event["type"] == "error":

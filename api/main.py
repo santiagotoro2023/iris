@@ -21,6 +21,7 @@ import activity
 import auth
 import chat
 import files
+import memory
 import persona
 import reasoning
 import settings
@@ -107,6 +108,7 @@ app.include_router(files.router)  # same
 # Its own /voice prefix: a WebSocket cannot go on a router carrying a Request-typed
 # dependency, so the listener authenticates itself inside the handler.
 app.include_router(wake.router)
+app.include_router(memory.router)
 
 
 class InferRequest(BaseModel):
@@ -135,8 +137,9 @@ async def health(_: dict = Depends(auth.active_user)):
 
 
 @app.post("/infer")
-async def infer(req: InferRequest, _: dict = Depends(auth.active_user)):
-    return await reasoning.run(req.messages, model=req.model, think=req.think)
+async def infer(req: InferRequest, user: dict = Depends(auth.active_user)):
+    return await reasoning.run(req.messages, model=req.model, think=req.think,
+                               user_id=user["id"])
 
 
 _ASSET_VERSION = "dev"

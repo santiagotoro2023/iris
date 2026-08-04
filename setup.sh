@@ -13,6 +13,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 MODEL_DEFAULT="qwen3:8b"
 VISION_DEFAULT="qwen2.5vl:3b"
+EMBED_DEFAULT="bge-m3"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
            data/searxng data/media data/wakewords
@@ -160,6 +161,7 @@ ensure_env() {
   add_env POSTGRES_DB iris
   add_env IRIS_MODEL "$MODEL_DEFAULT"
   add_env IRIS_VISION_MODEL "$VISION_DEFAULT"
+  add_env IRIS_EMBED_MODEL "$EMBED_DEFAULT"
   add_env IRIS_TZ "$(cat /etc/timezone 2>/dev/null || echo Europe/Zurich)"
   add_env IRIS_THINK ""
 }
@@ -196,16 +198,21 @@ wait_for_voice() {
   warn "Voice services still downloading (speech=$stt voice=$tts). Text chat works meanwhile."
 }
 
-# Both models IRiS reasons with: the language model and the vision model that reads
-# uploaded images. Pulled here so the first upload is not a silent 4 GB stall.
+# Everything Ollama serves: the language model, the vision model that reads uploaded
+# images, and the embedding model memories are searched by. Pulled here so the first
+# upload or the first remembered fact is not a silent multi-GB stall.
 pull_models() {
-  local model vision
+  local model vision embed
   model="$(grep -E '^IRIS_MODEL=' .env | cut -d= -f2- || true)"
   vision="$(grep -E '^IRIS_VISION_MODEL=' .env | cut -d= -f2- || true)"
-  log "Pulling ${model:-$MODEL_DEFAULT} (~5 GB) and ${vision:-$VISION_DEFAULT} (~3 GB)..."
+  embed="$(grep -E '^IRIS_EMBED_MODEL=' .env | cut -d= -f2- || true)"
+  log "Pulling ${model:-$MODEL_DEFAULT} (~5 GB), ${vision:-$VISION_DEFAULT} (~3 GB)" \
+      "and ${embed:-$EMBED_DEFAULT} (~1 GB)..."
   dc exec -T ollama ollama pull "${model:-$MODEL_DEFAULT}"
   dc exec -T ollama ollama pull "${vision:-$VISION_DEFAULT}" \
     || warn "Vision model pull failed; image analysis will be unavailable until it succeeds."
+  dc exec -T ollama ollama pull "${embed:-$EMBED_DEFAULT}" \
+    || warn "Embedding model pull failed; memory will be unavailable until it succeeds."
 }
 
 install() {
