@@ -1541,3 +1541,41 @@ config file.
 Frigate publishes events to MQTT, and mosquitto has been running unused since Phase 0.
 Subscribing to `frigate/events` would let a detection become a memory, a push, or a
 proactive message — which is the natural meeting point of §33, §34 and this section.
+
+
+## 38. Location, Greetings and News
+
+Three things Santiago caught in one screenshot and two messages, all of them the same
+underlying mistake: leaving to the model what could be decided in code.
+
+**"Good morning" at 22:18.** The prompt said "greet them" and the correct time was
+sitting in the notes directly above. The model said good morning anyway. `greeting()`
+now works it out and the notes carry the exact words to use. Under five in the morning
+it says "You're up late.", which is more useful than any of the three.
+
+**"The weather in Switzerland".** With Home unset, the forecast fell back to
+`location.region` and geocoded the country, putting the forecast in a field somewhere.
+The browser knows where it is and the server does not, so *"use my location"* next to
+Home posts a position, which is reverse-geocoded for a name and stored as ordinary
+settings. Weather now prefers the fix over any name. `0, 0` is treated as unset,
+because that is the Atlantic and it is also what an unset number setting defaults to.
+
+**"When is the next bus to Uster."** That question *has* an origin, it just is not
+spoken, and defaulting it to Home is wrong exactly when it matters: away from home.
+`nearest_stop()` asks the timetable for the closest stop to the stored fix, and both
+`transit` and `departures` take it when no origin is given. The tool schemas say so
+explicitly, because a model handed an optional argument fills it in anyway. Naming a
+place still wins over the fix, and Home still wins for the word "home".
+
+**News, with its sources.** The briefing searches the news category and attaches the
+results to the conversation as tool messages, so a briefing carries the same collapsed,
+linked source list a web search in chat does. Two bugs found by looking at the output
+rather than trusting it:
+
+1. **A 2015 Charlie Hebdo story arrived as today's news.** SearXNG needs
+   `time_range=day`, and results without a `publishedDate` are dropped outright: news
+   that cannot be dated cannot be shown as today's.
+2. **The headlines buried everything else.** Fed the full block, URLs and snippets and
+   all, the model stopped mentioning the weather and the train entirely. The notes now
+   carry titles only; the links stay in the attached sources where they belong. This is
+   the same lesson as §34: give the model less to weigh, not firmer instructions.

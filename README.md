@@ -191,8 +191,19 @@ departure board, a place search and the weather — so "when's the next train to
 Zurich?", "where's the nearest pharmacy?" and "do I need a coat?" are answered from
 live data rather than from a web search.
 
-Set **Home** and **Work** in Settings and the words work as words: "the next train
-home" resolves without naming the stop. Left empty, IRiS asks rather than guessing.
+Press **use my location** next to Home in Settings and the browser hands over a
+position. After that:
+
+- *"what's the weather"* uses where you are, not a town name and certainly not the
+  middle of the country.
+- *"when's the next bus to Uster"* starts from **the nearest stop to you**, because
+  that question has an origin, it just is not spoken. Naming a starting point still
+  wins.
+- Set **Home** and **Work** too, and the words work as words: "the next train home"
+  resolves without naming the stop.
+
+Geolocation needs a secure context, the same caveat as the microphone: localhost or
+HTTPS.
 
 > Transit is Switzerland only, which is what [SPEC.md §5](./SPEC.md) specifies.
 > Nominatim's usage policy caps requests at one a second and requires an identifying
@@ -209,6 +220,11 @@ to "go and check everything" means it sometimes decides it already knows, and a
 briefing that quietly invents your morning is worse than no briefing. It arrives as a
 new conversation in the chat — as if IRiS had messaged first — and goes out to every
 configured webhook. *briefing* in the Conversations tab runs one on demand.
+
+It covers, in order: the weather where you are, the commute, your calendar, your mail,
+and a few headlines from the world and your region. The headlines come from a live
+news search and **the sources are attached to the briefing** as an ordinary collapsed
+source list, with links, exactly as a web search in chat looks.
 
 **Quiet hours** wrap midnight properly, so 22:00 to 07:00 means what it says. A
 briefing due inside them waits. If the machine was off at briefing time, the day is

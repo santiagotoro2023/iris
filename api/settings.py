@@ -98,10 +98,13 @@ async def get_values():
     return values()
 
 
-@router.put("/values")
-async def put_values(patch: dict, request: Request):
+async def apply(patch: dict, actor: str | None = None) -> dict:
     """Apply a partial update. Validates the *merged* result, so a patch cannot
-    leave the configuration in a state the schema forbids."""
+    leave the configuration in a state the schema forbids.
+
+    Split out of the endpoint so anything server-side that needs to change a
+    setting goes through exactly the same validation, persistence and broadcast.
+    """
     unknown = sorted(set(patch) - set(REGISTRY))
     if unknown:
         raise HTTPException(400, f"unknown settings: {unknown}")
@@ -124,9 +127,14 @@ async def put_values(patch: dict, request: Request):
     await _broadcast(patch)
     await activity.record(
         "settings.change",
-        ", ".join(f"{k} = {v}" for k, v in patch.items()),
-        getattr(getattr(request, "state", None), "username", None))
+        ", ".join(f"{k} = {v}" for k, v in patch.items()), actor)
     return values()
+
+
+@router.put("/values")
+async def put_values(patch: dict, request: Request):
+    return await apply(
+        patch, getattr(getattr(request, "state", None), "username", None))
 
 
 @router.get("/stream")

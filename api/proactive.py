@@ -51,6 +51,12 @@ settings.setting(
     title="Include mail in the briefing",
     description="Only has an effect once a mailbox is set up under Integrations.")
 settings.setting(
+    "proactive.news", type="boolean", default=True,
+    title="Include the news",
+    description="A few headlines from the world and from your region, found by web "
+                "search. The sources are attached to the briefing so you can see "
+                "where each came from.")
+settings.setting(
     "proactive.calendar", type="boolean", default=True,
     title="Include the calendar",
     description="Today's appointments. Only has an effect once a calendar is set up "
@@ -63,6 +69,19 @@ settings.setting(
     "proactive.commute", type="boolean", default=True,
     title="Include the commute",
     description="Next departures from Home to Work. Needs both set under Settings.")
+
+
+def greeting(when: datetime) -> str:
+    """Worked out here, not by the model. Told to "greet them" with the time sitting
+    in front of it, an 8B model still opened with "Good morning" at 22:18."""
+    hour = when.hour
+    if hour < 5:
+        return "You're up late."
+    if hour < 12:
+        return "Good morning."
+    if hour < 18:
+        return "Good afternoon."
+    return "Good evening."
 
 
 def _now() -> datetime:
@@ -81,13 +100,47 @@ def in_quiet_hours(when: datetime | None = None) -> bool:
     return now >= start or now < end
 
 
-async def gather() -> list[str]:
+async def news() -> list[dict]:
+    """Headlines as tool messages, so the briefing carries its sources exactly the
+    way a live web search does and the same collapsed list renders them."""
+    import reasoning
+    region = settings.get("location.home") or settings.get("location.region")
+    out = []
+    for label, query in (("the world", "world news"), (region, f"{region} news")):
+        try:
+            content = await asyncio.to_thread(
+                reasoning.search, query, "news", 4, "day", 2)
+        except Exception as e:
+            print(f"[proactive] news search failed: {e}", flush=True)
+            continue
+        # An empty or failed search is left out rather than reported as "no news
+        # today", which would be a claim about the world instead of about the search.
+        if content.startswith("search failed") or content.startswith("No results"):
+            continue
+        # Titles only for the notes. Feeding the model the full block, URLs and
+        # snippets and all, buried the weather and the journey under 800 characters
+        # of news and it simply stopped mentioning them.
+        titles = [line[2:].split(" <")[0].strip()
+                  for line in content.splitlines() if line.startswith("- ")]
+        out.append({"role": "tool", "tool_name": "web_search",
+                    "label": f"Headlines from {label}", "display": "sources",
+                    "content": content, "titles": titles})
+    return out
+
+
+async def gather() -> tuple[list[str], list[dict]]:
     """The facts, from the tools, deterministically. Anything unavailable is simply
-    left out rather than guessed at or apologised for."""
+    left out rather than guessed at or apologised for.
+
+    Returns the notes the wording is built from, and the tool messages that carry
+    the evidence behind them.
+    """
     import places
     parts: list[str] = []
+    sources: list[dict] = []
     now = _now()
     parts.append(now.strftime("It is %H:%M on %A, %d %B %Y."))
+    parts.append(f"Greet them with exactly: {greeting(now)}")
 
     if settings.get("proactive.weather") and settings.get("location.enabled"):
         try:
@@ -117,7 +170,14 @@ async def gather() -> list[str]:
             except Exception as e:
                 print(f"[proactive] mail check failed: {e}", flush=True)
 
-    return parts
+    if settings.get("proactive.news"):
+        sources = await news()
+        for item in sources:
+            if item["titles"]:
+                parts.append(f"{item['label']}:\n"
+                             + "\n".join(f"- {t}" for t in item["titles"]))
+
+    return parts, sources
 
 
 BRIEFING_PROMPT = """\
@@ -125,38 +185,47 @@ Write the morning briefing from the notes below. Rules:
 
 Use ONLY what is in the notes. Do not add weather, news, appointments or anything
 else that is not there, and do not apologise for what is missing.
+Where the notes contain headlines, give two or three of the most consequential in
+one line each, in your own words. Do not include the links; they are attached
+separately.
 Keep it to a few sentences. No headers, no bullet points unless the notes contain a
 list of things, no sign-off, no offer of further help.
-Open by greeting them, once.
+Open with the exact greeting the notes give you, once, and never a different one.
+Do not state the date or the time back to them unless something depends on it.
 
 NOTES:
 """
 
 
-async def compose() -> str:
+async def compose() -> tuple[str, list[dict]]:
     import memory
-    facts = await gather()
-    if len(facts) <= 1:
-        # Only the date. There is nothing to brief, and saying so plainly beats
-        # padding it out.
-        return facts[0] + " Nothing else to report."
+    facts, sources = await gather()
+    if len(facts) <= 2:            # the time and the greeting, and nothing else
+        return f"{greeting(_now())} Nothing to report.", sources
     try:
         text = await memory._complete(BRIEFING_PROMPT + "\n".join(facts), "")
     except Exception as e:
         print(f"[proactive] wording failed, sending the notes: {e}", flush=True)
-        return "\n".join(facts)
+        return "\n".join(facts), sources
     import reasoning
-    return reasoning.strip_emoji(reasoning.strip_dashes(text.strip())) or \
-        "\n".join(facts)
+    clean = reasoning.strip_emoji(reasoning.strip_dashes(text.strip()))
+    return clean or "\n".join(facts), sources
 
 
 async def deliver(text: str, user_id: int, username: str,
-                  title: str = "Briefing") -> dict:
-    """Into the chat, where a person will actually see it, and out to every webhook."""
+                  title: str = "Briefing", sources: list[dict] | None = None) -> dict:
+    """Into the chat, where a person will actually see it, and out to every webhook.
+
+    The sources go in as tool messages ahead of the reply, so a briefing reads as an
+    ordinary conversation: the same collapsed source list, with the same links.
+    """
     import chat
     cid = uuid.uuid4().hex
     stamp = _now().strftime("%a %d %b, %H:%M")
-    await chat._save(user_id, cid, [{"role": "assistant", "content": text}],
+    # `titles` is only for prompting; the stored message keeps the linked content.
+    stored = [{k: v for k, v in s.items() if k != "titles"} for s in (sources or [])]
+    await chat._save(user_id, cid,
+                     stored + [{"role": "assistant", "content": text}],
                      title=f"{title} — {stamp}")
     hooks = await integrations.notify(text, event="briefing")
     await activity.record("proactive.briefing",
@@ -186,8 +255,8 @@ async def scheduler() -> None:
             if not user:
                 continue
             last_date = today
-            text = await compose()
-            await deliver(text, user["id"], user["username"])
+            text, sources = await compose()
+            await deliver(text, user["id"], user["username"], sources=sources)
             print(f"[proactive] briefing delivered to {user['username']}", flush=True)
         except Exception as e:
             print(f"[proactive] failed: {e}", flush=True)
@@ -208,10 +277,11 @@ async def status(_: dict = Depends(auth.active_user)):
         "enabled": settings.get("proactive.enabled"),
         "briefing_at": settings.get("proactive.briefing_at"),
         "quiet_now": in_quiet_hours(),
-        "sources": await gather(),
+        "sources": (await gather())[0],
     }
 
 
 @router.post("/briefing")
 async def run_now(user: dict = Depends(auth.require_role("creator", "admin"))):
-    return await deliver(await compose(), user["id"], user["username"])
+    text, sources = await compose()
+    return await deliver(text, user["id"], user["username"], sources=sources)

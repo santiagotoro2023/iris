@@ -3,8 +3,10 @@
 Run inside the api container, which already has openWakeWord and can reach the
 voice service:
 
-    docker compose cp wakeword/evaluate.py api:/tmp/e.py
-    docker compose exec -T api python /tmp/e.py hey_iris "hey iris"
+    docker compose cp wakeword/evaluate.py api:/app/evaluate.py
+    docker compose exec -T api python /app/evaluate.py hey_iris "hey iris"
+
+It has to land in /app, not /tmp: it imports `wake`, which lives beside it.
 
 A model is only useful if the gap between the two columns is wide. The negatives
 matter more than the positives: a wake word that fires on ordinary conversation is

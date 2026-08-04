@@ -6,14 +6,33 @@ model_name: "__NAME__"
 target_phrase:
   - "__PHRASE__"
 
-# Words that sound close enough to cause false wakes. The pipeline already mines
-# phoneme-overlapping negatives automatically; these are the ones worth naming.
+# Words that sound close enough to cause false wakes. The pipeline mines
+# phoneme-overlapping negatives automatically, but that was not enough: the first
+# model scored 0.943 on "The iris of the eye controls how much light gets in",
+# against 0.952 for the wake word itself. No threshold separates those.
+#
+# "the iris" is the killer, because the owner of this assistant talks about IRiS
+# constantly. Hence the deliberate weight of variants on that one shape.
 custom_negative_phrases:
   - "iris"
+  - "the iris"
+  - "an iris"
+  - "my iris"
+  - "her iris"
+  - "the irises"
+  - "the iris of the eye"
+  - "the iris controls the light"
+  - "with the iris"
+  - "about the iris"
+  - "in the iris"
+  - "and the iris"
+  - "that iris"
+  - "this iris"
   - "irish"
   - "hey chris"
-  - "the iris"
+  - "hey idris"
   - "my eyes"
+  - "the eyes"
 
 # Upstream's minimum is 20,000 and it says 100,000+ is often best. 30,000 is the
 # most that fits comfortably in one session on a 3060 Ti.
@@ -55,4 +74,6 @@ max_negative_weight: 1500
 
 # A wake word that fires unbidden is worse than one that occasionally misses, and
 # this runs all day in a home. 0.2 per hour is upstream's own default.
-target_false_positives_per_hour: 0.2
+# Tightened from 0.2 after the first model proved that a wake word which fires on
+# ordinary speech is useless however well it hears the phrase.
+target_false_positives_per_hour: 0.05

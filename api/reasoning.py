@@ -82,9 +82,9 @@ QUICK_COMMANDS: dict[str, dict] = {
     "transit": {
         "label": "Transit",
         "hint": "where to, or where from and to",
-        "directive": "Use the transit and departures tools to answer this. If only "
-                     "one place is given, treat it as the destination and start from "
-                     "home. Give times, not prose.",
+        "directive": "Use the transit and departures tools. If only one place is "
+                     "named, it is the destination and the origin is left out, which "
+                     "starts from where they are. Give times, not prose.",
         "needs": "location.enabled",
     },
     "camera": {
@@ -238,31 +238,35 @@ async def _calendar():
 
 
 @tool("transit",
-      "Public transport times between two places in Switzerland. Accepts station "
-      "names, addresses, and the words 'home' and 'work', which resolve to the "
-      "configured addresses.",
+      "Public transport times in Switzerland. Give only the destination unless the "
+      "user named a starting point: the origin defaults to the nearest stop to where "
+      "they are. Also accepts 'home' and 'work'.",
       {"type": "object",
        "properties": {
-           "origin": {"type": "string", "description": "Where the journey starts."},
-           "destination": {"type": "string", "description": "Where it ends."},
+           "destination": {"type": "string", "description": "Where the journey ends."},
+           "origin": {"type": "string",
+                      "description": "Where it starts. OMIT THIS unless the user "
+                                     "actually named a starting point: left out, it "
+                                     "uses the nearest stop to where they are."},
            "when": {"type": "string",
                     "description": "Optional departure time as HH:MM. Omit for now."}},
-       "required": ["origin", "destination"]},
-      activity="Checking the timetable, {origin} to {destination}", display="lines")
-async def _transit(origin: str, destination: str, when: str = ""):
+       "required": ["destination"]},
+      activity="Checking the timetable to {destination}", display="lines")
+async def _transit(destination: str, origin: str = "", when: str = ""):
     import places
     return await places.journey(origin, destination, when or None)
 
 
 @tool("departures",
-      "The next departures from a Swiss station, as on the board at the platform. "
-      "Use this when asked what is leaving soon rather than for a specific journey.",
+      "The next departures from a Swiss stop, as on the board at the platform. Use "
+      "this when asked what is leaving soon rather than for a specific journey. Omit "
+      "the station to use the nearest stop to where they are.",
       {"type": "object",
        "properties": {"station": {"type": "string",
-                                  "description": "Station or stop name, or 'home'."}},
-       "required": ["station"]},
+                                  "description": "Station or stop name. Omit for the "
+                                                 "nearest stop to where they are."}}},
       activity="Reading the board at {station}", display="lines")
-async def _departures(station: str):
+async def _departures(station: str = ""):
     import places
     return await places.departures(station)
 
@@ -289,7 +293,9 @@ async def _find_place(query: str, near: str = ""):
       "question about the weather, what to wear, or whether to take an umbrella.",
       {"type": "object",
        "properties": {"place": {"type": "string",
-                                "description": "Town or address. Omit for home."}}},
+                                "description": "Town or address. OMIT THIS unless the "
+                                               "user named a place: left out, it uses "
+                                               "where they actually are."}}},
       activity="Checking the weather {place}", display="lines")
 async def _weather(place: str = ""):
     import places
@@ -324,11 +330,45 @@ async def _look_at_camera(camera: str):
        "required": ["query"]},
       activity='Searching the web for "{query}"', display="sources")
 def _web_search(query: str):
-    r = httpx.get(f"{SEARXNG_URL}/search",
-                  params={"q": query, "format": "json"}, timeout=25)
+    return search(query)
+
+
+def search(query: str, category: str = "", limit: int = 6,
+           time_range: str = "", max_age_days: int = 0) -> str:
+    """One place that formats search hits, so anything rendering them as sources
+    (the chat, the briefing) parses exactly the same shape.
+
+    `time_range` is passed to SearXNG, and `max_age_days` additionally drops results
+    that carry a publishedDate older than that. Both are needed: the first briefing
+    asked for "top world news headlines today" and was handed a 2015 story about
+    Charlie Hebdo, which is worse than no news at all.
+    """
+    params = {"q": query, "format": "json"}
+    if category:
+        params["categories"] = category
+    if time_range:
+        params["time_range"] = time_range
+    r = httpx.get(f"{SEARXNG_URL}/search", params=params, timeout=25)
     if r.status_code != 200:
         return f"search failed: HTTP {r.status_code}"
-    results = (r.json().get("results") or [])[:6]
+    results = r.json().get("results") or []
+    if max_age_days:
+        cutoff = datetime.now(ZoneInfo("UTC")).timestamp() - max_age_days * 86400
+        fresh = []
+        for item in results:
+            stamp = item.get("publishedDate")
+            if not stamp:
+                continue          # undated is not datable, and news must be dated
+            try:
+                when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=ZoneInfo("UTC"))
+            except ValueError:
+                continue
+            if when.timestamp() >= cutoff:
+                fresh.append(item)
+        results = fresh
+    results = results[:limit]
     if not results:
         return f"No results for {query!r}."
     lines = []

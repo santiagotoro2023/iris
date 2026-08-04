@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field as PField
 
 import auth
 import settings
@@ -40,6 +41,14 @@ settings.setting(
     title="Work",
     description="Same idea for the other end of the commute.")
 settings.setting(
+    "location.latitude", type="number", minimum=-90, maximum=90, default=0.0,
+    title="Latitude",
+    description="Set by 'use my location' in the browser. Weather uses this directly "
+                "when it is set, which is far more precise than a town name.")
+settings.setting(
+    "location.longitude", type="number", minimum=-180, maximum=180, default=0.0,
+    title="Longitude")
+settings.setting(
     "location.region", type="string", default="Switzerland",
     title="Where to search",
     description="Biases place searches, so 'a pharmacy' means a nearby one rather "
@@ -51,11 +60,39 @@ settings.setting(
                 "need no account. Transit covers Switzerland only.")
 
 
-def resolve(name: str) -> str:
-    """'home' and 'work' are the two words a person actually uses."""
+_HERE = {"here", "current location", "my location", "where i am", "nearby",
+         "hier", "my position"}
+
+
+async def nearest_stop() -> str:
+    """The closest stop to wherever the browser last said we were.
+
+    "when is the next bus to Uster" has an origin, it just is not spoken, and
+    defaulting it to Home is wrong precisely when it matters: away from home.
+    """
+    coords = _fixed_coordinates()
+    if not coords:
+        return ""
+    lat, lon = coords
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{TRANSPORT_URL}/locations", params={"x": lon, "y": lat})
+    if r.status_code != 200:
+        return ""
+    for station in r.json().get("stations") or []:
+        # Entries without an id are addresses rather than stops, and the timetable
+        # cannot depart from a street number.
+        if station.get("id") and station.get("name"):
+            return station["name"]
+    return ""
+
+
+async def resolve(name: str) -> str:
+    """The words a person actually uses, mapped to something the timetable knows."""
     key = (name or "").strip().lower()
+    if not key or key in _HERE:
+        return await nearest_stop() or settings.get("location.home") or name
     if key in ("home", "zuhause", "hause"):
-        return settings.get("location.home") or name
+        return settings.get("location.home") or await nearest_stop() or name
     if key in ("work", "the office", "office", "arbeit", "büro"):
         return settings.get("location.work") or name
     return name
@@ -86,7 +123,10 @@ def _minutes(duration: str | None) -> str:
 
 
 async def journey(origin: str, destination: str, when: str | None = None) -> str:
-    origin, destination = resolve(origin), resolve(destination)
+    origin, destination = await resolve(origin), await resolve(destination)
+    if not origin:
+        return ("I do not know where you are. Set Home in Settings, or allow location "
+                "in the browser.")
     params = {"from": origin, "to": destination, "limit": 4}
     if when:
         params["time"] = when
@@ -112,8 +152,11 @@ async def journey(origin: str, destination: str, when: str | None = None) -> str
     return "\n".join(lines)
 
 
-async def departures(station: str, limit: int = 6) -> str:
-    station = resolve(station)
+async def departures(station: str = "", limit: int = 6) -> str:
+    station = await resolve(station)
+    if not station:
+        return ("I do not know where you are. Name a stop, set Home in Settings, or "
+                "allow location in the browser.")
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.get(f"{TRANSPORT_URL}/stationboard",
                         params={"station": station, "limit": limit})
@@ -172,9 +215,63 @@ async def _coordinates(place: str) -> tuple[float, float] | None:
     return _geocoded[key]
 
 
+NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
+
+
+async def reverse(lat: float, lon: float) -> str:
+    """Coordinates to a name a person recognises, for the briefing to say."""
+    async with _nominatim_lock:
+        global _last_nominatim
+        wait = NOMINATIM_MIN_INTERVAL - (time.monotonic() - _last_nominatim)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(NOMINATIM_REVERSE,
+                            params={"lat": lat, "lon": lon, "format": "json",
+                                    "zoom": 14},
+                            headers={"User-Agent": USER_AGENT})
+        _last_nominatim = time.monotonic()
+    if r.status_code != 200:
+        return ""
+    address = r.json().get("address", {})
+    for key in ("city", "town", "village", "suburb", "municipality", "county"):
+        if address.get(key):
+            return address[key]
+    return (r.json().get("display_name") or "").split(",")[0]
+
+
+_reverse_cache: dict[tuple[float, float], str] = {}
+
+
+async def _place_name(lat: float, lon: float) -> str:
+    key = (round(lat, 3), round(lon, 3))
+    if key not in _reverse_cache:
+        _reverse_cache[key] = await reverse(lat, lon)
+    return _reverse_cache[key]
+
+
+def _fixed_coordinates() -> tuple[float, float] | None:
+    """Only trust a stored fix if it is actually set; 0,0 is in the Atlantic."""
+    lat = settings.get("location.latitude")
+    lon = settings.get("location.longitude")
+    return (lat, lon) if (lat or lon) else None
+
+
 async def weather(place: str = "") -> str:
-    where = place or settings.get("location.home") or settings.get("location.region")
-    coords = await _coordinates(where)
+    if place:
+        where = place
+        coords = await _coordinates(place)
+    else:
+        # A precise fix from the browser beats geocoding a town name, and beats
+        # falling back to the country, which puts the forecast in a random field.
+        coords = _fixed_coordinates()
+        where = settings.get("location.home") or settings.get("location.region")
+        if coords and not settings.get("location.home"):
+            # The coordinates were right but the label said "Switzerland", which
+            # reads as though the forecast is for the whole country.
+            where = await _place_name(*coords) or where
+        if not coords:
+            coords = await _coordinates(where)
     if not coords:
         return f"I could not find {where!r} on the map, so I cannot get its weather."
     lat, lon = coords
@@ -240,6 +337,25 @@ async def find_place(query: str, near: str = "") -> str:
         lines.append(f"- {parts[0]}" + (f", {', '.join(parts[1:4])}" if len(parts) > 1
                                         else ""))
     return "\n".join(lines)
+
+
+class Position(BaseModel):
+    latitude: float = PField(ge=-90, le=90)
+    longitude: float = PField(ge=-180, le=180)
+
+
+@router.post("/location")
+async def set_location(body: Position, user: dict = Depends(auth.active_user)):
+    """The browser knows where it is; the server does not. Stored as settings so it
+    is visible and editable like everything else (SPEC.md 3.1)."""
+    name = await reverse(body.latitude, body.longitude)
+    patch = {"location.latitude": round(body.latitude, 4),
+             "location.longitude": round(body.longitude, 4)}
+    # Only fill Home if it is empty: a name he typed himself outranks a guess.
+    if name and not settings.get("location.home"):
+        patch["location.home"] = name
+    await settings.apply(patch, actor=user["username"])
+    return {"place": name or "unknown", **patch}
 
 
 @router.get("/departures")

@@ -439,16 +439,53 @@ def test_compaction_expires_old_transcripts_and_nothing_else():
 def test_home_and_work_resolve_to_configured_places():
     """SPEC.md 8 had "home/work addresses" as an ASK USER. They are settings instead,
     so the two words a person actually uses work without asking him anything."""
-    with patch.dict(settings._overrides, {"location.home": "Winterthur",
+    import asyncio
+
+    async def no_gps():
+        return ""
+
+    with patch.object(places, "nearest_stop", no_gps), \
+         patch.dict(settings._overrides, {"location.home": "Winterthur",
                                           "location.work": "Zurich HB"}):
-        assert places.resolve("home") == "Winterthur"
-        assert places.resolve("Home") == "Winterthur"
-        assert places.resolve("the office") == "Zurich HB"
-        assert places.resolve("Bern") == "Bern"      # a real place is left alone
-    # Unconfigured must fall through to the literal word, never to an empty query,
-    # which the transit API answers with every station in the country.
-    with patch.dict(settings._overrides, {"location.home": ""}):
-        assert places.resolve("home") == "home"
+        assert asyncio.run(places.resolve("home")) == "Winterthur"
+        assert asyncio.run(places.resolve("Home")) == "Winterthur"
+        assert asyncio.run(places.resolve("the office")) == "Zurich HB"
+        assert asyncio.run(places.resolve("Bern")) == "Bern"   # a real place is left alone
+        # No origin given means "from where I am", which without a fix falls back
+        # to Home rather than to an empty query.
+        assert asyncio.run(places.resolve("")) == "Winterthur"
+        assert asyncio.run(places.resolve("here")) == "Winterthur"
+
+    with patch.object(places, "nearest_stop", no_gps), \
+         patch.dict(settings._overrides, {"location.home": ""}):
+        assert asyncio.run(places.resolve("home")) == "home"
+
+
+def test_a_location_fix_beats_home_for_where_i_am():
+    """"the next bus to Uster" has an origin, it just is not spoken, and defaulting
+    it to Home is wrong precisely when it matters: away from home."""
+    import asyncio
+
+    async def gps():
+        return "Uster, Bahnhof"
+
+    with patch.object(places, "nearest_stop", gps), \
+         patch.dict(settings._overrides, {"location.home": "Winterthur"}):
+        assert asyncio.run(places.resolve("")) == "Uster, Bahnhof"
+        assert asyncio.run(places.resolve("here")) == "Uster, Bahnhof"
+        # Naming a place still wins over the fix.
+        assert asyncio.run(places.resolve("Bern")) == "Bern"
+        assert asyncio.run(places.resolve("home")) == "Winterthur"
+
+
+def test_a_zero_coordinate_is_not_a_location():
+    """0,0 is in the Atlantic, and an unset number setting defaults to it."""
+    with patch.dict(settings._overrides, {"location.latitude": 0.0,
+                                          "location.longitude": 0.0}):
+        assert places._fixed_coordinates() is None
+    with patch.dict(settings._overrides, {"location.latitude": 47.5,
+                                          "location.longitude": 8.7}):
+        assert places._fixed_coordinates() == (47.5, 8.7)
 
 
 def test_journey_duration_is_readable_aloud():
@@ -697,7 +734,7 @@ def test_an_announcement_survives_missing_arguments():
     """Formatting happens mid-reply, so a gap must never become a KeyError."""
     assert reasoning.announce("find_place", {"query": "a pharmacy"}) \
         == "Looking on the map for a pharmacy"
-    assert reasoning.announce("transit", {}) == "Checking the timetable, to"
+    assert reasoning.announce("transit", {}) == "Checking the timetable to"
     assert reasoning.announce("nope", {}) == "Running nope"
     assert reasoning.announce("web_search", None)
 

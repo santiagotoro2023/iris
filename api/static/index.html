@@ -246,6 +246,40 @@ function rowFor(key, spec) {
   CONTROLS[key] = control;
   row.append(control);
 
+  // The server cannot know where the browser is, so the browser has to say.
+  if (key === "location.home") {
+    const locate = el("button", "ghost", "use my location");
+    locate.type = "button";
+    locate.style.marginTop = ".5rem";
+    const note = el("div", "desc");
+    locate.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        note.textContent = "This browser will not share a location.";
+        return;
+      }
+      locate.disabled = true;
+      note.textContent = "asking the browser…";
+      navigator.geolocation.getCurrentPosition(async pos => {
+        try {
+          const r = await send("places/location", {
+            latitude: pos.coords.latitude, longitude: pos.coords.longitude}, "POST");
+          note.textContent = `Set to ${r.place} (${r["location.latitude"]}, `
+            + `${r["location.longitude"]}). Weather and transit use this now.`;
+        } catch (e) {
+          note.textContent = "Could not save: " + e.message;
+        }
+        locate.disabled = false;
+      }, err => {
+        // Geolocation needs a secure context, exactly like the microphone.
+        note.textContent = err.code === 1
+          ? "Permission refused."
+          : "Unavailable: " + err.message + " (needs https, or localhost)";
+        locate.disabled = false;
+      }, {enableHighAccuracy: false, timeout: 15000, maximumAge: 600000});
+    });
+    row.append(locate, note);
+  }
+
   // Auditioning is the only way to choose a voice, so put it next to the choice.
   if (key === "voice.tts_speaker") {
     const preview = el("button", "ghost", "preview voice");
