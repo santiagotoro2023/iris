@@ -1,0 +1,58 @@
+# openWakeWord training config, filled in by train.sh (SPEC.md 24).
+# __PHRASE__ and __NAME__ are substituted; everything else is a deliberate choice.
+
+model_name: "__NAME__"
+
+target_phrase:
+  - "__PHRASE__"
+
+# Words that sound close enough to cause false wakes. The pipeline already mines
+# phoneme-overlapping negatives automatically; these are the ones worth naming.
+custom_negative_phrases:
+  - "iris"
+  - "irish"
+  - "hey chris"
+  - "the iris"
+  - "my eyes"
+
+# Upstream's minimum is 20,000 and it says 100,000+ is often best. 30,000 is the
+# most that fits comfortably in one session on a 3060 Ti.
+n_samples: 30000
+n_samples_val: 5000
+
+tts_batch_size: 50
+augmentation_batch_size: 16
+augmentation_rounds: 1
+
+piper_sample_generator_path: "/opt/piper-sample-generator"
+output_dir: "/work/out"
+
+rir_paths:
+  - "/work/datasets/mit_rirs"
+
+background_paths:
+  - "/work/datasets/audioset_16k"
+  - "/work/datasets/fma"
+background_paths_duplication_rate:
+  - 1
+  - 1
+
+false_positive_validation_data_path: "/work/datasets/validation_set_features.npy"
+
+feature_data_files:
+  "ACAV100M_sample": "/work/datasets/ACAV100M.npy"
+
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 32
+
+steps: 50000
+max_negative_weight: 1500
+
+# A wake word that fires unbidden is worse than one that occasionally misses, and
+# this runs all day in a home. 0.2 per hour is upstream's own default.
+target_false_positives_per_hour: 0.2

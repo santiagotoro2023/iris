@@ -240,6 +240,7 @@ uninstall() {
     log "Kept ./data and .env."
     echo "  ./data holds all of IRiS's memory (Postgres, Qdrant, models, media)"
     echo "  and any wake word models you trained, in ./data/wakewords."
+    [ -d data/wakeword-training ] && echo "  Wake word training data is still there too:  ./wakeword/train.sh --clean"
     echo "  To remove those too:  ./setup.sh --uninstall --purge"
     return 0
   fi

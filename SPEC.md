@@ -984,3 +984,57 @@ spending the download and the GPU time.
   contract. 37 pass.
 - `README.md` documented a test command that could not work: `test_api.py` is not in
   the image and the api service has no source mount. Corrected to mount the file.
+
+## 24. Training a Custom Wake Word
+
+Santiago, verbatim:
+
+> Can we train a model to listen to Iris / hey iris etc. ? / are there any other
+> non-name specific words we can use to wake it i dont want jarvis
+
+Answered in two parts. The non-name words are handled in §23 and shipped
+immediately (`computer` is now the default). This section is the training path, and
+Santiago chose **"hey iris"** over bare "iris": upstream's guidance is that longer
+phrases are markedly more reliable, and "iris" is both two syllables and an ordinary
+English word, so it would collide with normal speech far more often.
+
+**`./wakeword/train.sh "hey iris"`** does the whole job. It is not part of `setup.sh`
+and `docker compose up` never builds it, because it pulls torch, speechbrain and a
+TTS stack that the running assistant has no use for.
+
+| stage | what it does |
+|---|---|
+| build | `wakeword/Dockerfile`, CUDA + torch on Ubuntu 22.04 for Python 3.10 |
+| fetch | `fetch_data.py`, ~6 GB into `data/wakeword-training` |
+| generate | 30,000 synthetic sayings of the phrase, many voices, via piper-sample-generator |
+| augment | room impulse responses and background noise mixed in, features computed |
+| train | DNN head over the frozen melspectrogram and embedding models |
+| install | the `.onnx` into `data/wakewords/`, where the dropdown finds it |
+
+**Python 3.10, not 3.12.** `piper-phonemize` has no 3.12 wheels, and the pipeline was
+written against Colab's 3.10. Ubuntu 22.04's system Python is 3.10, which is why the
+training image is built on the CUDA Ubuntu base rather than `python:3.12-slim`.
+`webrtcvad` has no wheels at all and fails to compile without headers, so
+`webrtcvad-wheels` is used instead.
+
+**The tflite export at the end is expected to fail** and is ignored. It needs
+`tensorflow-cpu==2.8.1` and `onnx_tf`, an ancient stack we deliberately do not
+install; the ONNX file we actually use is written *before* that step. `train.sh`
+tolerates the failure and then checks the `.onnx` exists.
+
+**The three stages are separately flagged** (`--generate_clips`, `--augment_clips`,
+`--train_model`) and run as three invocations, so an interrupted run resumes at the
+stage it reached instead of regenerating 30,000 clips.
+
+**`target_false_positives_per_hour: 0.2`.** A wake word that fires unbidden is worse
+than one that occasionally needs saying twice, and this listens all day in a home.
+The config also names confusable phrases explicitly (`iris`, `irish`, `hey chris`,
+`the iris`, `my eyes`) on top of the phoneme-overlap negatives the pipeline mines
+for itself.
+
+**Validate before trusting.** `wakeword/evaluate.py` scores a model against three
+Piper en_GB voices the training never saw, plus negatives that deliberately include
+"The iris of the eye controls how much light gets in" and "Hey Chris, are you coming
+to the thing on Saturday". The gap between the columns is the whole result; a model
+is only usable if the weakest positive clears 0.5 while the worst negative stays
+under 0.3.

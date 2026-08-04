@@ -122,9 +122,12 @@ said instead (*Interrupt while speaking*).
 > `setup.sh` also fetches four that are not — `computer`, `ok_computer`, `ok_home`
 > and `hey_house` — and the default is **`computer`**, measured at 0.99 on its own
 > phrase against 0.001 on unrelated speech. Training an "IRiS" model is a separate
-> job; drop the resulting
-> `.onnx` into `./data/wakewords/` and it appears in the *Wake word* dropdown on its
-> own, no restart. Wake detection is deliberately suppressed while IRiS is speaking,
+> job, and `./wakeword/train.sh "hey iris"` does it: it builds a throwaway training
+> image, fetches ~6 GB of speech, reverb and noise corpora, synthesises 30,000 spoken
+> variations of the phrase, trains, and installs the result. Budget an hour or two,
+> mostly downloading. Any `.onnx` in `./data/wakewords/` appears in the *Wake word*
+> dropdown on its own, no restart, and `wakeword/evaluate.py` scores one against
+> voices it was never trained on before you trust it. Wake detection is deliberately suppressed while IRiS is speaking,
 > so it cannot wake itself, and barge-in leans on the browser's echo cancellation.
 
 Every control is drawn by the app — no native `<select>`, no number-spinner arrows,
