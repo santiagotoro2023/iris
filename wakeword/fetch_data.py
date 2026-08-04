@@ -4,14 +4,17 @@ Everything lands in /work/datasets, which is ./data/wakeword-training on the hos
 Each step is skipped if its output already exists, so an interrupted download is
 resumed by simply running this again.
 
-Sizes are dominated by the two pre-computed feature files (~2.2 GB together); the
-audio corpora are deliberately small samples, which is what the upstream notebook
-does too. More background audio makes a more robust model, so `--hours` raises it.
+Sizes are dominated by the pre-computed negative features: 17.3 GB, not the ~2 GB
+upstream implies. The audio corpora are deliberately small samples, as in the
+upstream notebook. More background audio makes a more robust model, so `--hours`
+raises it.
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -64,34 +67,57 @@ def main() -> None:
 
     print("2/4 room impulse responses (reverb, so it works across a room)")
     if not done(ROOT / "mit_rirs", 100):
+      try:
         rirs = datasets.load_dataset("davidscripka/MIT_environmental_impulse_responses",
                                      split="train", streaming=True)
         write_wavs(rirs, ROOT / "mit_rirs")
+      except Exception as e:
+        print(f"  skipped: {e}")
 
-    print("3/4 background noise from AudioSet")
-    if not done(ROOT / "audioset_16k", 100):
-        tar = ROOT / "bal_train09.tar"
-        wget("https://huggingface.co/datasets/agkphysics/AudioSet/resolve/main/data/"
-             "bal_train09.tar", tar)
-        subprocess.run(["tar", "-xf", str(tar)], cwd=ROOT, check=True)
-        flac = sorted(str(p) for p in (ROOT / "audio").glob("**/*.flac"))
-        ds = datasets.Dataset.from_dict({"audio": flac}).cast_column(
-            "audio", datasets.Audio(sampling_rate=16000))
-        write_wavs(ds, ROOT / "audioset_16k")
-        tar.unlink(missing_ok=True)
+    # Household sounds, not music: dogs, doors, traffic, appliances, people. The
+    # upstream notebook used an AudioSet tar that no longer exists (that repository
+    # is parquet now, and the pinned `datasets` cannot stream the new layout).
+    # ESC-50 is a direct, ungated zip of exactly this kind of audio.
+    print("3/4 environmental noise from ESC-50")
+    if not done(ROOT / "esc50_16k", 100):
+      try:
+        zipped = ROOT / "esc50.zip"
+        wget("https://github.com/karolpiczak/ESC-50/archive/refs/heads/master.zip",
+             zipped)
+        # stdlib rather than the unzip binary: adding an apt package would
+        # invalidate the torch layer and force a half-hour rebuild.
+        with zipfile.ZipFile(zipped) as z:
+            z.extractall(ROOT)
+        clips = sorted((ROOT / "ESC-50-master" / "audio").glob("*.wav"))
+        out = ROOT / "esc50_16k"
+        out.mkdir(exist_ok=True)
+        for clip in tqdm(clips):
+            # Already 16-bit wav, but at 44.1 kHz; ffmpeg is the least fussy resampler
+            # and is in this image for piper-sample-generator anyway.
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(clip),
+                            "-ar", "16000", "-ac", "1", str(out / clip.name)],
+                           check=True)
+        zipped.unlink(missing_ok=True)
+        shutil.rmtree(ROOT / "ESC-50-master", ignore_errors=True)
+      except Exception as e:
+        print(f"  skipped: {e}")
 
     print(f"4/4 background music from the Free Music Archive ({args.hours} h)")
     clips = int(args.hours * 3600 // 30)          # FMA clips are 30 s each
     if not done(ROOT / "fma", clips // 2):
+      try:
         fma = datasets.load_dataset("rudraml/fma", name="small", split="train",
                                     streaming=True).cast_column(
                                         "audio", datasets.Audio(sampling_rate=16000))
         write_wavs(fma, ROOT / "fma", limit=clips)
+      except Exception as e:
+        print(f"  skipped: {e}")
 
     total = sum(f.stat().st_size for f in ROOT.rglob("*") if f.is_file())
     print(f"\nready: {total / 2**30:.1f} GB in {ROOT}")
-    for d in ("mit_rirs", "audioset_16k", "fma"):
-        print(f"  {d:14} {len(list((ROOT / d).glob('*.wav')))} clips")
+    for d in ("mit_rirs", "esc50_16k", "fma"):
+        n = len(list((ROOT / d).glob("*.wav"))) if (ROOT / d).is_dir() else 0
+        print(f"  {d:14} {n} clips")
 
 
 if __name__ == "__main__":

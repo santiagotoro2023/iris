@@ -31,7 +31,7 @@ rir_paths:
   - "/work/datasets/mit_rirs"
 
 background_paths:
-  - "/work/datasets/audioset_16k"
+  - "/work/datasets/esc50_16k"
   - "/work/datasets/fma"
 background_paths_duplication_rate:
   - 1
