@@ -524,6 +524,41 @@ _EMOJI = re.compile(
     "️‍⃣]+")       # variation selector, ZWJ, keycap
 
 
+# Bare and markdown-wrapped links alike. The tool banner beside the reply already
+# carries every link, and pasting a 140-character maps URL into a sentence makes the
+# sentence unreadable. Prompting against it did not hold (SPEC.md 45).
+_MD_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
+_BARE_URL = re.compile(r"(?<![\w(])https?://[^\s<>)\]]+")
+
+
+def strip_links(text: str) -> str:
+    """Keep the words, drop the address."""
+    text = _MD_LINK.sub(r"\1", text)
+    text = _BARE_URL.sub("", text)
+    # "Full route: ." and "see  for details" are what removal leaves behind.
+    text = re.sub(r"[ \t]*\(\s*\)", "", text)
+    text = re.sub(r"^[ \t]*(full route|link|source|map|url)\s*:\s*$", "",
+                  text, flags=re.I | re.M)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+# A link arrives across several tokens, so stripping each delta on its own would cut
+# one in half. Hold back a trailing fragment that could still become a link.
+# Covers a half-typed "[text", a half-typed "[text](url", and a bare "https://par".
+_MAYBE_LINK = re.compile(
+    r"(?:\[[^\]\n]*(?:\]\([^\s)]*)?|\bhttps?:[^\s<>)\]]*)$")
+MAX_HELD = 300
+
+
+def split_for_links(buffer: str) -> tuple[str, str]:
+    """(safe to send now, keep for the next token)."""
+    m = _MAYBE_LINK.search(buffer)
+    if not m or len(buffer) - m.start() > MAX_HELD:
+        return buffer, ""            # nothing pending, or it was never a link
+    return buffer[:m.start()], buffer[m.start():]
+
+
 def strip_emoji(text: str) -> str:
     """Bullets, arrows and accented letters are below this range and stay put."""
     return re.sub(r"[ \t]{2,}", " ", _EMOJI.sub("", text))
@@ -643,6 +678,7 @@ async def stream(messages: list[dict], model: str | None = None,
 
             parts: list[str] = []
             tool_calls: list[dict] = []
+            held = ""
             async with c.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
                 if r.status_code != 200:
                     detail = (await r.aread()).decode()[:300]
@@ -657,11 +693,20 @@ async def stream(messages: list[dict], model: str | None = None,
                         continue
                     msg = chunk.get("message") or {}
                     if msg.get("content"):
-                        piece = strip_emoji(strip_dashes(msg["content"]))
-                        parts.append(piece)
-                        yield {"type": "delta", "text": piece}
+                        held += strip_emoji(strip_dashes(msg["content"]))
+                        ready, held = split_for_links(held)
+                        piece = strip_links(ready)
+                        if piece:
+                            parts.append(piece)
+                            yield {"type": "delta", "text": piece}
                     if msg.get("tool_calls"):
                         tool_calls.extend(msg["tool_calls"])
+                    if chunk.get("done") and held:
+                        piece = strip_links(held)
+                        held = ""
+                        if piece:
+                            parts.append(piece)
+                            yield {"type": "delta", "text": piece}
                     if chunk.get("done"):
                         break
 

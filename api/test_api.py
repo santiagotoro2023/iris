@@ -147,6 +147,43 @@ def test_em_dashes_never_reach_the_client():
     assert reasoning.strip_dashes("one \u2013 two") == "one, two"
 
 
+def test_links_are_stripped_from_replies():
+    """The tool banner beside a reply already carries every link, and a 140-character
+    maps URL in a sentence makes the sentence unreadable. Prompting did not hold."""
+    assert reasoning.strip_links(
+        "Full route: [Google Maps](https://maps.google.com/x?a=1&b=2)") \
+        == "Full route: Google Maps"
+    assert reasoning.strip_links("Their site is [sidmar.ch](https://sidmar.ch/).") \
+        == "Their site is sidmar.ch."
+    assert "http" not in reasoning.strip_links("See https://example.com/a for more.")
+
+
+def test_a_link_split_across_tokens_is_not_cut_in_half():
+    """Deltas arrive a few characters at a time, so stripping each one alone would
+    emit half a URL and strip the other half."""
+    out, buffer = [], ""
+    for token in ["See ", "[Goo", "gle Maps](", "https://ex", "ample.com/a?b=1",
+                  ") for more."]:
+        buffer += token
+        ready, buffer = reasoning.split_for_links(buffer)
+        out.append(reasoning.strip_links(ready))
+    out.append(reasoning.strip_links(buffer))
+    whole = "".join(out)
+    assert whole == "See Google Maps for more.", whole
+
+
+def test_an_ordinary_bracket_does_not_stall_the_stream():
+    """Holding back anything starting with "[" would freeze the reply on a list."""
+    buffer = "A list [one] and [two]. Done."
+    ready, held = reasoning.split_for_links(buffer)
+    assert ready == buffer and held == ""
+    # An unterminated bracket is held, but only up to a bound.
+    _, held = reasoning.split_for_links("text [unterminated")
+    assert held == "[unterminated"
+    _, held = reasoning.split_for_links("text [" + "x" * 400)
+    assert held == "", "a runaway bracket must be released, not buffered forever"
+
+
 def test_emoji_is_stripped_but_text_is_not():
     """Emojis are banned outright (SPEC.md 22)."""
     assert reasoning.strip_emoji("Operational \U0001F31F and ready \U0001F60A") \

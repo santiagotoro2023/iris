@@ -439,9 +439,13 @@ async def find_place(query: str, near: str = "") -> str:
         return f"Nothing found for {query!r} near {where}."
     lines = [f"{query} near {where}:"]
     for item in results:
-        parts = item.get("display_name", "").split(", ")
-        lines.append(f"- {parts[0]}" + (f", {', '.join(parts[1:4])}" if len(parts) > 1
-                                        else ""))
+        full = item.get("display_name", "")
+        parts = full.split(", ")
+        where_bits = f", {', '.join(parts[1:4])}" if len(parts) > 1 else ""
+        # The link goes on the result, so the banner is worth opening on its own.
+        lines.append(f"- {parts[0]}{where_bits} "
+                     f"https://www.google.com/maps/search/?api=1&"
+                     f"query={quote_plus(full)}")
     return "\n".join(lines)
 
 

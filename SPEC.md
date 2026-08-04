@@ -1686,3 +1686,28 @@ Verified afterwards, all four correct: the SIDMAR question now searches and call
 contained plausible numbers, and the model reproduced them verbatim. An example that
 can be parroted as fact is worse than none, so it now shows the shape with the figures
 left as placeholders.
+
+
+## 45. Links Belong Beside the Answer, Not Inside It
+
+Every route and every place carries a link, and the model kept pasting 140-character
+maps URLs into the middle of sentences. The persona was told not to, twice, and it
+did anyway. So it is stripped in code, like the em-dashes (§18) and the emoji (§22):
+a markdown link collapses to its text and a bare URL is removed.
+
+**Stripping a stream is not stripping a string.** A URL arrives across several
+tokens, so applying the filter to each delta alone emits half a link and strips the
+other half. `split_for_links()` holds back a trailing fragment that could still become
+one: a half-typed `[text`, a half-typed `[text](url`, or a bare `https://par`. It
+releases the fragment once it resolves, and after 300 characters regardless, so an
+ordinary bracket in prose never freezes the reply.
+
+**The links did not disappear, they moved.** The tool banner beside the answer carries
+them, and banners now render markdown and bare links as links rather than as text, so
+a map or a website is one click away from the result that mentioned it. `find_place`
+attaches a map link to each result for the same reason.
+
+Also fixed: markdown links were never rendered anywhere in the chat, so every link
+IRiS had ever produced was dead text. And `syncHandsFree()` was called by both the
+click handler and the live settings feed, so the microphone was opened, and failed,
+twice, which is why the no-microphone notice appeared twice.

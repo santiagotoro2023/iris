@@ -683,10 +683,15 @@ function toolResult(label, content, display) {
     head.append(el("span", "tool-count", `${sources.length} source${sources.length === 1 ? "" : "s"}`));
     if (!sources.length) body.append(el("div", "src-snip", content));
   } else if (display === "lines") {
-    for (const line of String(content).split("\n").filter(Boolean))
-      body.append(el("div", "tool-lineitem", line.replace(/^[-*]\s*/, "")));
+    for (const line of String(content).split("\n").filter(Boolean)) {
+      const row = el("div", "tool-lineitem");
+      renderInline(line.replace(/^[-*]\s*/, ""), row);   // links stay links
+      body.append(row);
+    }
   } else {
-    body.append(el("div", "src-snip", content));
+    const row = el("div", "src-snip");
+    renderInline(String(content), row);
+    body.append(row);
   }
   box.append(body);
   return box;
@@ -1335,7 +1340,19 @@ function hfState(state, title) {
     $("#mic").title = "Hands-free listening is on";
 }
 
+let handsFreeStarting = false;
+
 async function startHandsFree() {
+  if (hf || handsFreeStarting) return;
+  handsFreeStarting = true;
+  try {
+    await openHandsFree();
+  } finally {
+    handsFreeStarting = false;
+  }
+}
+
+async function openHandsFree() {
   if (hf) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     hfState("off", "Hands-free needs https, or localhost.");
