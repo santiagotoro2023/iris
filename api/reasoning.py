@@ -390,14 +390,16 @@ async def _find_place(query: str, near: str = ""):
 
 
 @tool("analyze_file",
-      "Read an uploaded picture, document or video again to answer a specific "
-      "question about it: what it shows, what it says, what happens in it.",
+      "Read an uploaded picture, document or video: what it shows, what it says, "
+      "what happens in it. An attachment marked as not yet read MUST be read with "
+      "this before answering anything about it. A video is transcribed as well as "
+      "watched, which takes a moment.",
       {"type": "object",
        "properties": {
            "file": {"type": "string",
                     "description": "The file's name. Omit for the most recent."},
            "question": {"type": "string", "description": "What to look for."}}},
-      activity="Looking at {file}", display="text")
+      activity="Reading {file}", display="text")
 async def _analyze_file(file: str = "", question: str = ""):
     import files
     return await files.analyse_stored(file or (files.recent(1) or [""])[0], question)
@@ -590,10 +592,20 @@ def for_model(message: dict) -> dict:
     out = {k: v for k, v in message.items() if k in _MODEL_KEYS}
     attachments = message.get("attachments") or []
     if attachments:
-        blocks = "\n\n".join(
-            f"[Attached {a.get('kind', 'file')}: {a.get('name', 'file')}]\n"
-            f"{a.get('text', '')}" for a in attachments)
-        out["content"] = f"{out.get('content', '')}\n\n{blocks}".strip()
+        blocks = []
+        for a in attachments:
+            kind, name = a.get("kind", "file"), a.get("name", "file")
+            text = a.get("text")
+            if text:
+                # Conversations from before uploads were read on demand.
+                blocks.append(f"[Attached {kind}: {name}]\n{text}")
+            else:
+                blocks.append(
+                    f"[Attached {kind}: {name}. It has NOT been read yet. Call "
+                    f"analyze_file with file=\"{name}\" to read it before answering "
+                    f"anything about it.]")
+        out["content"] = f"{out.get('content', '')}\n\n" + "\n\n".join(blocks)
+        out["content"] = out["content"].strip()
     return out
 
 

@@ -532,3 +532,5 @@ button { font: inherit; color: inherit; }
 .stopped { font-family: var(--mono); font-size: .64rem; letter-spacing: .12em;
            text-transform: uppercase; color: var(--dim); margin-top: .4rem; }
 .chip.pending .chip-x { margin-left: .1rem; }
+
+.chip-size { font-family: var(--mono); font-size: .62rem; color: var(--dim); }

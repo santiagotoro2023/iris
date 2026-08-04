@@ -1901,3 +1901,31 @@ reply being written, stops the audio reading it out, cancels uploads in flight a
 clears the attachments. Called when switching conversations, starting a new one, and
 deleting the one currently being written to, where previously the reply carried on
 being generated and read aloud into a conversation that no longer existed.
+
+
+## 53. Reading a File Is Part of the Answer
+
+Santiago: *"instead of transcribing before sending it should transcribe after sending
+... because for a video file that takes a while and i just want to upload, send and
+have it transcribe itself"*.
+
+Right, and it also fixes a smaller wrong: reading a file was the one thing IRiS did
+without saying so, because it happened before the conversation started.
+
+`POST /files/upload` now stores the file and reports only its name, kind and size.
+The message carries that reference, and `for_model` tells the model in as many words
+that the attachment **has not been read** and which tool reads it. The existing
+`analyze_file` does the work, so the reading appears as "Reading briefing.mp4" beside
+the reply, like every other action.
+
+Verified end to end: a video uploaded in milliseconds, the banner appeared during the
+reply, and the answer came from its transcribed audio.
+
+Conversations from before this still carry their extracted text, and `for_model`
+passes that through unchanged rather than asking the model to re-read something it
+already has.
+
+**Several at once, and from the clipboard.** The picker takes multiple files, and a
+paste anywhere on the chat tab attaches whatever the clipboard holds, which is how a
+screenshot actually arrives. The paste is only intercepted when the clipboard carries
+files, so pasting text still pastes text.

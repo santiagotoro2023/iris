@@ -199,7 +199,10 @@ Only the verbatim record expires: whatever IRiS learned from a conversation was
 distilled into a memory when the exchange happened and is kept. Set it to 0 to keep
 everything forever.
 
-Uploads show a real progress bar, with a cross to cancel one mid-flight. **Send**
+Attach several files at once, or paste an image straight in with Ctrl+V. Uploading is
+just the upload; **reading the file happens during the reply**, as a tool with its own
+banner, so a two-minute video does not hold up the message. Uploads show a real
+progress bar, with a cross to cancel one mid-flight. **Send**
 becomes **Stop** while a reply is being written and is blocked while a file is still
 going up. Leaving or deleting a conversation abandons everything that belonged to it:
 the reply being written, the speech reading it out, and any upload in flight.

@@ -120,6 +120,44 @@ async def _describe_image(data: bytes, prompt: str) -> str:
     return (r.json().get("message") or {}).get("content", "").strip()
 
 
+def kind_of(name: str, ctype: str = "") -> str:
+    suffix = ("." + name.lower().rsplit(".", 1)[-1]) if "." in name else ""
+    ctype = (ctype or "").split(";")[0]
+    if suffix in VIDEO_SUFFIXES or ctype.startswith("video/"):
+        return "video"
+    if ctype in IMAGE_TYPES or suffix in IMAGE_SUFFIXES:
+        return "image"
+    if suffix == ".pdf" or ctype == "application/pdf":
+        return "pdf"
+    if suffix == ".docx":
+        return "document"
+    if suffix in TEXT_SUFFIXES or ctype.startswith("text/"):
+        return "text"
+    return "file"
+
+
+@router.post("/upload")
+async def store(file: UploadFile = File(...),
+                user: dict = Depends(auth.active_user)):
+    """Keep the file and say what it is. Nothing is read yet.
+
+    Reading a two-minute video takes a minute, and doing it before the message is
+    sent means staring at a progress bar with nothing to do. It happens during the
+    reply instead, as a tool call with its own banner.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty file")
+    if not _room_for(len(data)):
+        raise HTTPException(413, f"no room for {len(data) // 2**20} MB on the disk")
+    name = file.filename or "upload"
+    path = keep(name, data)
+    kind = kind_of(name, file.content_type or "")
+    await activity.record("file.upload", f"{name} ({kind}, {len(data) // 1024} KiB)",
+                          user["username"])
+    return {"name": path.name, "kind": kind, "bytes": len(data)}
+
+
 @router.post("/analyze")
 async def analyze(file: UploadFile = File(...),
                   question: str = Form(""),

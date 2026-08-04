@@ -61,7 +61,7 @@
       <div class="cmd-chip" id="quick-chip" hidden></div>
       <div class="composer-note" id="composer-note" hidden></div>
       <div class="composer">
-        <input type="file" id="file-input" hidden
+        <input type="file" id="file-input" hidden multiple
                accept="image/*,video/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
         <button class="mic" id="attach" type="button" aria-label="Attach a file"
                 title="Attach an image or document">
@@ -750,12 +750,20 @@ function searchResult(query, content) {
 }
 
 function attachmentBlock(a) {
+  // Nothing to fold out until it has been read, and reading it is a tool call whose
+  // own banner carries the result.
+  if (!a.text) {
+    const line = el("div", "attachment");
+    line.append(el("span", null, `${a.kind}: ${a.name}`));
+    if (a.bytes) line.append(el("span", "chip-size",
+                                ` · ${(a.bytes / 2 ** 20).toFixed(1)} MB`));
+    return line;
+  }
   const box = document.createElement("details");
   box.className = "tool-result attachment";
   const summary = document.createElement("summary");
-  summary.append(el("span", "chev-sm"),
-                 el("span", null, `${a.kind}: ${a.name}`));
-  box.append(summary, el("div", "src-snip", a.text || ""));
+  summary.append(el("span", "chev-sm"), el("span", null, `${a.kind}: ${a.name}`));
+  box.append(summary, el("div", "src-snip", a.text));
   return box;
 }
 
@@ -1198,6 +1206,8 @@ function renderAttachBar() {
   for (const a of ATTACHMENTS) {
     const chip = el("span", "chip");
     chip.append(el("span", "chip-kind", a.kind), el("span", "chip-name", a.name));
+    if (a.bytes)
+      chip.append(el("span", "chip-size", `${(a.bytes / 2 ** 20).toFixed(1)} MB`));
     const x = el("button", "chip-x", "\u2715");
     x.type = "button";
     x.title = "Remove";
@@ -1267,9 +1277,31 @@ function progressChip(file, controller) {
   };
 }
 
-$("#file-input").addEventListener("change", async e => {
-  const file = e.target.files?.[0];
+$("#file-input").addEventListener("change", e => {
+  const files = [...(e.target.files || [])];
   e.target.value = "";
+  files.forEach(attachFile);
+});
+
+/* Paste an image or a file straight in, which is how a screenshot actually arrives. */
+$("#composer").addEventListener("paste", e => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();          // otherwise the filename is also pasted as text
+  files.forEach(attachFile);
+});
+document.addEventListener("paste", e => {
+  // Anywhere on the chat tab, as long as a text box does not want it first.
+  if (document.activeElement?.tagName === "INPUT"
+      || document.activeElement === $("#composer")) return;
+  if (!$("#view-chat").classList.contains("active")) return;
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  files.forEach(attachFile);
+});
+
+async function attachFile(file) {
   if (!file) return;
 
   const controller = new AbortController();
@@ -1281,20 +1313,21 @@ $("#file-input").addEventListener("change", async e => {
   try {
     const form = new FormData();
     form.append("file", file);
-    const data = await upload("files/analyze", form, pending.set, controller.signal);
-    pending.reading();
+    // Upload only. Reading it happens during the reply, as a tool with a banner.
+    const data = await upload("files/upload", form, pending.set, controller.signal);
+    pending.node.remove();
     ATTACHMENTS.push(data);
     renderAttachBar();
   } catch (err) {
     pending.node.remove();
     // A cancellation is a decision, not a failure, and needs no report.
     if (err.name !== "AbortError")
-      $("#chat-log").append(bubble("tool", `could not read ${file.name}: ${err.message}`));
+      $("#chat-log").append(bubble("tool", `could not upload ${file.name}: ${err.message}`));
   } finally {
     UPLOADS.delete(controller);
     sendButtonState();
   }
-});
+}
 
 /* --------------------------------------------------------------- voice -- */
 let recorder = null, chunks = [];
