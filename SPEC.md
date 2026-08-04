@@ -1390,3 +1390,42 @@ creation with a secret that does not appear in the response, an edit that keeps 
 password while changing the host, `400` for an unknown type, `400` for a missing
 required field, `409` for a duplicate name, and the command list shrinking when a
 feature is disabled.
+
+
+## 34. Phase 7 — The Proactive Engine
+
+The first shape of IRiS speaking first, and the one that pays for itself daily.
+
+**Facts from tools, wording from the model.** `gather()` calls the transit and mail
+tools directly and returns plain notes; the model is then asked only to phrase them,
+under a prompt that forbids adding anything not in the notes. The tempting design is
+to hand the model the tools and say "brief me", and it is the wrong one: an 8B model
+sometimes decides it already knows, and a briefing that quietly invents your morning
+is worse than none. If the wording step fails, the notes are delivered raw.
+
+**Delivered where a person looks.** A new conversation in the chat, as if IRiS had
+messaged first, plus every configured webhook (§33). It reuses `chat._save`, so a
+briefing is an ordinary conversation: searchable, speakable, and subject to the same
+retention as any other.
+
+**Quiet hours wrap midnight**, because that is the normal case. A plain
+`start <= now < end` is wrong for 22:00–07:00 and would have IRiS talking at three in
+the morning; tested at both kinds of window, and at equal bounds meaning "no quiet
+hours" rather than "permanently silent".
+
+**Stateless scheduling** again: it tracks the date already briefed rather than a
+timer, so a restart cannot double-brief, and a machine that was off at briefing time
+skips the day instead of delivering breakfast news at lunchtime.
+
+**Off by default.** Everything else in IRiS answers when spoken to. Something that
+starts a conversation should be switched on deliberately.
+
+Verified: quiet hours across midnight; the commute pulled live from the timetable;
+and a briefing with nothing configured saying "Nothing else to report" rather than
+padding.
+
+### Still open in Phase 7
+
+Event-driven triggers — a camera seeing someone, mail from a particular sender,
+something in memory falling due — need a rules UI, which is the natural next use of
+the registry in §33: a `rule` kind with a trigger type and an action type.

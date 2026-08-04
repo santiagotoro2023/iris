@@ -29,6 +29,7 @@ import integrations
 import memory
 import persona
 import places
+import proactive
 import registry
 import reasoning
 import settings
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI):
     await registry.init()
     asyncio.create_task(backup.scheduler())
     asyncio.create_task(memory.compactor())
+    asyncio.create_task(proactive.scheduler())
     yield
 
 
@@ -123,6 +125,7 @@ app.include_router(backup.router)
 app.include_router(registry.make_router('device'))
 app.include_router(registry.make_router('integration'))
 app.include_router(places.router)
+app.include_router(proactive.router)
 
 
 class InferRequest(BaseModel):

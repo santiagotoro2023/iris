@@ -198,6 +198,22 @@ home" resolves without naming the stop. Left empty, IRiS asks rather than guessi
 > Nominatim's usage policy caps requests at one a second and requires an identifying
 > User-Agent; both are enforced here rather than hoped for.
 
+## Speaking first
+
+IRiS can start a conversation rather than only answering. **Speak first** is off by
+default, because it should be your decision that it may interrupt you.
+
+The daily briefing is built the sober way round: the facts are gathered by calling
+the tools directly, and only the *wording* is left to the model. Asking an 8B model
+to "go and check everything" means it sometimes decides it already knows, and a
+briefing that quietly invents your morning is worse than no briefing. It arrives as a
+new conversation in the chat — as if IRiS had messaged first — and goes out to every
+configured webhook. *briefing* in the Conversations tab runs one on demand.
+
+**Quiet hours** wrap midnight properly, so 22:00 to 07:00 means what it says. A
+briefing due inside them waits. If the machine was off at briefing time, the day is
+skipped rather than delivered at lunchtime.
+
 ## Backups
 
 Everything IRiS knows lives in three places, so a backup is all three or it is

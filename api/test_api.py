@@ -13,6 +13,7 @@ import auth
 import main
 import persona
 import places
+import proactive
 import reasoning
 import registry
 import settings
@@ -457,6 +458,37 @@ def test_journey_duration_is_readable_aloud():
     assert places._minutes(None) == "?"
     assert places._minutes("nonsense") == "?"
     assert places._minutes("00dxx:yy:00") == "00dxx:yy:00"   # shaped but unparseable
+
+
+def test_quiet_hours_wrap_midnight():
+    """Quiet hours normally cross midnight, so a plain start <= now < end comparison
+    is wrong for the common case rather than the rare one, and would let IRiS speak
+    at three in the morning."""
+    import datetime
+    tz = datetime.timezone.utc
+
+    def at(hour):
+        return datetime.datetime(2026, 8, 4, hour, 0, tzinfo=tz)
+
+    with patch.dict(settings._overrides, {"proactive.quiet_from": "22:00",
+                                          "proactive.quiet_to": "07:00"}):
+        assert not proactive.in_quiet_hours(at(21))
+        assert proactive.in_quiet_hours(at(22))
+        assert proactive.in_quiet_hours(at(3))
+        assert proactive.in_quiet_hours(at(6))
+        assert not proactive.in_quiet_hours(at(7))
+        assert not proactive.in_quiet_hours(at(12))
+
+    # A window that does not wrap must still work.
+    with patch.dict(settings._overrides, {"proactive.quiet_from": "09:00",
+                                          "proactive.quiet_to": "17:00"}):
+        assert proactive.in_quiet_hours(at(12))
+        assert not proactive.in_quiet_hours(at(20))
+
+    # Equal bounds means no quiet hours at all, not permanently silent.
+    with patch.dict(settings._overrides, {"proactive.quiet_from": "00:00",
+                                          "proactive.quiet_to": "00:00"}):
+        assert not proactive.in_quiet_hours(at(3))
 
 
 def test_secret_fields_never_reach_a_client():

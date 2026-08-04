@@ -99,6 +99,7 @@
     <div class="conv-panel">
       <div class="conv-head">
         <span>Conversations</span>
+        <button class="ghost" id="brief-now" type="button">briefing</button>
         <button class="ghost" id="new-chat" type="button">new</button>
       </div>
       <div class="conv-list" id="conv-list" role="list"></div>
@@ -853,6 +854,21 @@ $("#composer").addEventListener("input", e => {
   e.target.style.height = "auto";
   e.target.style.height = Math.min(e.target.scrollHeight, 144) + "px";
 });
+$("#brief-now").addEventListener("click", async () => {
+  const btn = $("#brief-now");
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const r = await send("proactive/briefing", {}, "POST");
+    await loadConversations();
+    await openConversation(r.conversation_id, {focusChat: true});
+  } catch (e) {
+    $("#conv-list").prepend(el("div", "empty", "Could not brief: " + e.message));
+  }
+  btn.textContent = "briefing";
+  btn.disabled = false;
+});
+
 $("#new-chat").addEventListener("click", () => {
   CONV = null;
   paintChat([]);

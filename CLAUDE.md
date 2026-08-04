@@ -20,6 +20,6 @@ Host: stzrhws01 (RTX 3060 Ti, 8GB VRAM). Data/media volumes: `./data/` (gitignor
 - [~] Phase 4 — Home Cameras: **on-demand looking done**, as one *device type* in the generic registry (`api/registry.py` + `cameras.py`/`devices.py` — camera and microphone; SPEC.md §30, §33). Remaining: Frigate NVR — needs the camera inventory, a VRAM/acceleration decision and a retention policy; **ASK USER**
 - [ ] Phase 5 — Shared Frontend & Client Apps
 - [~] Phase 6 — Integrations & Tools: **web search, vision/document analysis, transit + places done** (`api/places.py` — transport.opendata.ch and OSM Nominatim, both credential-free; home/work are settings, closing that ASK USER — SPEC.md §31) (`searxng` + `web_search` tool; `api/files.py` with qwen2.5vl for images, pypdf/python-docx for documents). **Integrations are a registry too** (`api/integrations.py` — IMAP mailbox and webhook work today; §33). Calendar/WhatsApp/Graph still need credentials or an OAuth app
-- [ ] Phase 7 — Proactive Engine
+- [~] Phase 7 — Proactive Engine: **daily briefing done** (`api/proactive.py` — facts gathered from tools directly and only the wording left to the model, delivered as a chat conversation plus webhooks, quiet hours that wrap midnight; off by default — SPEC.md §34). Remaining: event-driven rules, which want a `rule` kind in the §33 registry
 - [~] Phase 8 — Personality & Self-Awareness: persona pulled forward (`api/persona.py`, editable in Settings). Self-inspection and self-modification not started
 - [ ] Phase 9 — Branding
