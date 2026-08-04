@@ -13,6 +13,7 @@ import auth
 import main
 import persona
 import places
+import frigate
 import integrations
 import proactive
 import reasoning
@@ -459,6 +460,26 @@ def test_journey_duration_is_readable_aloud():
     assert places._minutes(None) == "?"
     assert places._minutes("nonsense") == "?"
     assert places._minutes("00dxx:yy:00") == "00dxx:yy:00"   # shaped but unparseable
+
+
+def test_frigate_camera_keys_are_identifier_safe():
+    """Frigate keys cameras by name and rejects anything that is not identifier-like,
+    so "front door" and "Garden (side)" have to be reshaped rather than passed on."""
+    assert frigate.slug("front door") == "front_door"
+    assert frigate.slug("Garden (side)") == "garden_side"
+    assert frigate.slug("  Kitchen--Cam  ") == "kitchen_cam"
+    # Never empty: an empty YAML key would make the whole config unparseable.
+    assert frigate.slug("!!!") == "camera"
+    assert frigate.slug("") == "camera"
+
+
+def test_a_stream_url_cannot_break_out_of_the_generated_yaml():
+    """The URL is user input going into a config file, and camera passwords are full
+    of punctuation."""
+    nasty = 'rtsp://u:p"x@h/s'
+    assert frigate._yaml(nasty) == '"rtsp://u:p\\"x@h/s"'
+    assert frigate._yaml(True) == "true"
+    assert frigate._yaml(5) == "5"
 
 
 def test_ical_lines_are_unfolded_before_parsing():

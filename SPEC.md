@@ -1504,3 +1504,40 @@ joins `notify()`, so the daily briefing now reaches the phone as well as the cha
 - **MQTT** — mosquitto has been running since Phase 0 and is still unused; this is the
   cheapest route to anything else in the house.
 - **RSS** — a feed or two, folded into the briefing.
+
+
+## 37. Frigate, on the CPU
+
+Santiago chose CPU detection, so the GPU budget every earlier phase was tuned around
+is untouched: the 3060 Ti still holds the language model, Whisper and the vision model
+and nothing else.
+
+**The config is generated, not written.** Frigate is config-file driven, which sits
+badly with §3.4's "configure in the UI". `build_config()` renders it from the cameras
+already in the device registry (§33), so a camera is added once, in one place, and
+Frigate follows. The file carries a header saying edits are overwritten.
+
+**It runs under a compose profile.** Frigate refuses to start with an empty camera
+list, so a plain `docker compose up` must not try. `setup.sh` starts it only when a
+generated config exists, and adding the first camera needs one restart — the single
+part of this that cannot happen from the browser, because Frigate reads cameras at
+startup.
+
+**Resolution is probed, not guessed.** `ffprobe` asks the stream, because a wrong
+`detect: width/height` either crops the frame or wastes CPU rescaling it. An offline
+camera falls back to 1280x720 rather than refusing to write a config — and that
+fallback path had a real bug found by testing it: `proc.kill()` raises
+`ProcessLookupError` when ffprobe has already exited, which is the *common* case for
+an unreachable camera, not the rare one.
+
+**Two things a generated config must not get wrong**, both tested: camera names become
+identifier-safe keys ("Garden (side)" is not a YAML key, and an empty key makes the
+whole file unparseable), and stream URLs are always quoted with their quotes escaped,
+since a camera password is full of punctuation and this is user input going into a
+config file.
+
+### Still open in Phase 4
+
+Frigate publishes events to MQTT, and mosquitto has been running unused since Phase 0.
+Subscribing to `frigate/events` would let a detection become a memory, a push, or a
+proactive message — which is the natural meeting point of §33, §34 and this section.

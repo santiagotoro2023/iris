@@ -16,7 +16,8 @@ VISION_DEFAULT="qwen2.5vl:3b"
 EMBED_DEFAULT="bge-m3"
 # Every runtime state dir. Uninstall --purge removes the ./data root wholesale.
 DATA_DIRS=(data/postgres data/qdrant data/ollama data/redis data/whisper data/tts
-           data/searxng data/media data/wakewords
+           data/searxng data/media data/media/frigate data/wakewords
+           data/frigate
            data/mosquitto/data data/mosquitto/log)
 
 log()  { printf '\033[38;5;208m::\033[0m %s\n' "$*"; }
@@ -231,6 +232,11 @@ install() {
   wait_for_ollama
   pull_models
   wait_for_voice
+  # Frigate only runs once a camera exists; its config is generated from the UI.
+  if [ -s data/frigate/config.yml ]; then
+    log "Cameras configured, starting Frigate..."
+    dc --profile cameras up -d frigate || warn "Frigate failed to start; see: docker compose logs frigate"
+  fi
   log "Done. IRiS is running."
   echo
   echo "  Settings   http://localhost:8000/"

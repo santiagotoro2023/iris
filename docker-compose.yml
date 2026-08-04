@@ -49,6 +49,7 @@ services:
       IRIS_VISION_MODEL: ${IRIS_VISION_MODEL:-qwen2.5vl:3b}
       IRIS_EMBED_MODEL: ${IRIS_EMBED_MODEL:-bge-m3}
       QDRANT_URL: http://qdrant:6333
+      FRIGATE_URL: http://frigate:5000
       IRIS_BACKUP_KEY: ${IRIS_BACKUP_KEY:-}
       IRIS_TZ: ${IRIS_TZ:-Europe/Zurich}
       IRIS_THINK: ${IRIS_THINK:-}
@@ -58,6 +59,8 @@ services:
       - ./data/wakewords:/wakewords
       # Encrypted archives. Gitignored: this repo is public (SPEC.md 4).
       - ./backup:/backup
+      # Frigate's config is generated from the device registry, not hand-written.
+      - ./data/frigate:/frigate
     depends_on:
       ollama:
         condition: service_started
@@ -97,6 +100,26 @@ services:
       - ./data/tts:/models
     ports:
       - "127.0.0.1:8002:8002"
+
+  # Continuous recording and CPU object detection. Only started when there is a
+  # camera to point it at: Frigate refuses to boot with an empty camera list, and
+  # its config is generated from the device registry (SPEC.md 37).
+  #   docker compose --profile cameras up -d frigate
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    profiles: ["cameras"]
+    restart: unless-stopped
+    shm_size: "128mb"
+    volumes:
+      - ./data/frigate:/config
+      - ./data/media/frigate:/media/frigate
+    environment:
+      FRIGATE_MQTT_HOST: mqtt
+    depends_on:
+      mqtt:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5000:5000"
 
   searxng:
     image: searxng/searxng:latest

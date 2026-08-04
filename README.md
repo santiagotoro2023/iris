@@ -278,9 +278,21 @@ too, since it echoes the whole URL on failure.
 > is the point of the split: the next device or integration is a declaration, not a
 > feature.
 
-> Frigate — continuous recording, motion and object detection, event history — is
-> [SPEC.md §5](./SPEC.md)'s choice for the NVR half and is **not built yet**. It needs
-> per-camera tuning, a hardware-acceleration decision and the actual camera inventory.
+**Frigate** handles the recording half: continuous recording, motion and CPU object
+detection. Its config is *generated* from the cameras you added, not hand-written, so
+adding a camera in the UI and pressing apply is the whole workflow:
+
+```
+curl -X POST localhost:8000/frigate/apply     # or the button in Devices
+docker compose --profile cameras up -d frigate
+```
+
+It runs under a compose profile because Frigate refuses to start with an empty camera
+list, so `docker compose up` alone never starts it. **Detection is on the CPU by
+choice** — the 3060 Ti's 8 GB is already split between the language model, Whisper and
+the vision model, and continuous detection on top would change the budget every
+earlier phase was tuned around. *Detection frame rate* is the setting that decides how
+much of the machine it takes.
 
 ## Tools announce themselves
 

@@ -25,6 +25,7 @@ import cameras
 import chat
 import devices
 import files
+import frigate
 import integrations
 import memory
 import persona
@@ -126,6 +127,7 @@ app.include_router(registry.make_router('device'))
 app.include_router(registry.make_router('integration'))
 app.include_router(places.router)
 app.include_router(proactive.router)
+app.include_router(frigate.router)
 
 
 class InferRequest(BaseModel):
