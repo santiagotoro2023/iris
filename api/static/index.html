@@ -40,7 +40,8 @@
     <button class="tab" role="tab" aria-selected="true"  data-view="chat">Chat</button>
     <button class="tab" role="tab" aria-selected="false" data-view="conversations">Conversations</button>
     <button class="tab" role="tab" aria-selected="false" data-view="memory">Memory</button>
-    <button class="tab" role="tab" aria-selected="false" data-view="cameras">Cameras</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="devices">Devices</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="integrations">Integrations</button>
     <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
   </nav>
@@ -49,6 +50,7 @@
     <div class="chat-main">
       <div class="chat-log" id="chat-log"></div>
       <div id="attach-bar"></div>
+      <div class="chip" id="quick-chip" hidden></div>
       <div class="composer">
         <input type="file" id="file-input" hidden
                accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
@@ -68,6 +70,15 @@
             <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
           </svg>
         </button>
+        <button class="mic" id="quick" type="button" aria-label="Quick commands"
+                aria-haspopup="menu" aria-expanded="false" title="Quick commands">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+               stroke-linejoin="round">
+            <path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/>
+          </svg>
+        </button>
+        <div class="quick-menu" id="quick-menu" role="menu" hidden></div>
         <button class="mic" id="hands-free" type="button" aria-pressed="false"
                 aria-label="Hands-free listening" title="Hands-free listening">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
@@ -125,21 +136,27 @@
     </div>
   </section>
 
-  <section class="view" id="view-cameras" role="tabpanel">
+  <section class="view" id="view-devices" role="tabpanel">
     <div class="panel">
-      <h2>Cameras</h2>
-      <div class="mem-add">
-        <input class="input" id="cam-name" type="text" placeholder="Name, e.g. front door"
-               aria-label="Camera name" style="flex:0 0 12rem">
-        <input class="input" id="cam-url" type="text"
-               placeholder="rtsp://user:password@192.168.1.50:554/stream"
-               aria-label="Stream URL">
-        <button class="btn" id="cam-add" type="button">Add</button>
+      <h2>Devices</h2>
+      <div class="thing-add">
+        <button class="btn" data-add="device" type="button">Add a device</button>
+        <span class="desc" style="margin:0">Cameras, microphones, and whatever comes next.</span>
       </div>
-      <div class="desc" id="cam-note" style="padding:0 .8rem .6rem">
-        Passwords are stored on this machine and never sent back to the browser.
+      <div id="device-form"></div>
+      <div id="device-list"><div class="empty">loading…</div></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-integrations" role="tabpanel">
+    <div class="panel">
+      <h2>Integrations</h2>
+      <div class="thing-add">
+        <button class="btn" data-add="integration" type="button">Add an integration</button>
+        <span class="desc" style="margin:0">Credentials stay on this machine and are never sent back to the browser.</span>
       </div>
-      <div id="cam-list"><div class="empty">loading…</div></div>
+      <div id="integration-form"></div>
+      <div id="integration-list"><div class="empty">loading…</div></div>
     </div>
   </section>
 
@@ -169,7 +186,8 @@ document.querySelectorAll(".tab").forEach(tab => {
       v.classList.toggle("active", v.id === "view-" + tab.dataset.view));
     if (tab.dataset.view === "activity") loadActivity();
     if (tab.dataset.view === "memory") { loadMemories(); loadBackups(); }
-    if (tab.dataset.view === "cameras") loadCameras();
+    if (tab.dataset.view === "devices") loadThings("device");
+    if (tab.dataset.view === "integrations") loadThings("integration");
   });
 });
 
@@ -735,11 +753,13 @@ async function sendMessage() {
     const r = await api("chat/stream", {
       method: "POST", headers: {"content-type": "application/json"},
       body: JSON.stringify({content: text, conversation_id: CONV,
+                            command: COMMAND?.name,
                             attachments: ATTACHMENTS.length ? ATTACHMENTS : undefined}),
     });
     if (!r.ok || !r.body) throw new Error(`stream failed (${r.status})`);
     ATTACHMENTS = [];
     renderAttachBar();
+    setCommand(null);          // one turn, then back to ordinary chat
 
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -766,6 +786,64 @@ async function sendMessage() {
     box.focus();
   }
 }
+
+/* --------------------------------------------------------- quick commands -- */
+/* A directive prepended to the turn, which aims the model at the right tool without
+   taking the decision away from it. The menu is built from /commands, so a new
+   command is a dict entry on the server and nothing here. */
+let COMMAND = null;
+
+function setCommand(cmd) {
+  COMMAND = cmd;
+  const chip = $("#quick-chip");
+  $("#quick").setAttribute("aria-pressed", String(!!cmd));
+  $("#quick").classList.toggle("hearing", !!cmd);
+  if (!cmd) { chip.hidden = true; return; }
+  chip.hidden = false;
+  chip.textContent = "";
+  chip.append(el("span", null, cmd.label));
+  const clear = el("button", "chip-x", "\u00d7");
+  clear.type = "button";
+  clear.title = "Clear";
+  clear.addEventListener("click", () => setCommand(null));
+  chip.append(clear);
+  const box = $("#composer");
+  box.placeholder = cmd.hint ? cmd.hint[0].toUpperCase() + cmd.hint.slice(1) + "…"
+                             : "Ask IRiS…";
+  box.focus();
+}
+
+async function openQuickMenu() {
+  const menu = $("#quick-menu");
+  if (!menu.hidden) { menu.hidden = true; $("#quick").setAttribute("aria-expanded", "false"); return; }
+  menu.textContent = "";
+  let commands = [];
+  try { commands = (await json("commands")).commands; } catch { /* offline */ }
+  if (!commands.length) menu.append(el("div", "empty", "No commands available."));
+  for (const cmd of commands) {
+    const item = el("button", "quick-item");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.append(el("b", null, cmd.label), el("span", null, cmd.hint || ""));
+    item.addEventListener("click", () => {
+      setCommand(cmd);
+      menu.hidden = true;
+      $("#quick").setAttribute("aria-expanded", "false");
+    });
+    menu.append(item);
+  }
+  menu.hidden = false;
+  $("#quick").setAttribute("aria-expanded", "true");
+}
+
+$("#quick").addEventListener("click", openQuickMenu);
+document.addEventListener("click", e => {
+  const menu = $("#quick-menu");
+  if (!menu.hidden && !menu.contains(e.target) && e.target.closest("#quick") === null) {
+    menu.hidden = true;
+    $("#quick").setAttribute("aria-expanded", "false");
+  }
+});
 
 $("#send").addEventListener("click", sendMessage);
 $("#composer").addEventListener("keydown", e => {
@@ -1043,54 +1121,192 @@ $("#hands-free").addEventListener("click", async () => {
 // Release the microphone when the page goes away, without turning the setting off.
 window.addEventListener("pagehide", stopHandsFree);
 
-/* ------------------------------------------------------------- cameras -- */
-async function loadCameras() {
-  const list = $("#cam-list");
+/* ------------------------------------------- devices and integrations -- */
+/* One renderer for both tabs. A type declares its fields on the server and the
+   form is built from that, so a new device or integration needs no client work. */
+const TYPES = {};      // kind -> [type spec]
+
+function fieldControl(spec, value) {
+  if (spec.type === "boolean")
+    return Toggle({checked: value ?? spec.default ?? false, onChange: () => {}});
+  if (spec.choices?.length)
+    return Combo({options: spec.choices, value: value ?? spec.default, onChange: () => {}});
+  const input = el("input", "input");
+  input.type = spec.type === "password" ? "password" : "text";
+  if (spec.type === "number") input.inputMode = "numeric";
+  input.value = value ?? spec.default ?? "";
+  input.placeholder = spec.help || "";
+  input.setValue = v => { input.value = v ?? ""; };
+  input.getValue = () => input.value;
+  return input;
+}
+
+function readControl(control) {
+  if (control.getValue) return control.getValue();
+  if (control.value !== undefined) return control.value;      // Combo/Toggle expose it
+  return control.checked;
+}
+
+function buildForm(kind, spec, existing) {
+  const box = el("div", "thing-form");
+  box.append(el("div", "thing-form-title", spec.label));
+  if (spec.description) box.append(el("div", "desc", spec.description));
+
+  const nameInput = el("input", "input");
+  nameInput.type = "text";
+  nameInput.placeholder = "Name it, e.g. front door";
+  nameInput.value = existing?.name || "";
+  const nameRow = el("div", "thing-field");
+  nameRow.append(el("label", null, "Name"), nameInput);
+  box.append(nameRow);
+
+  const controls = {};
+  for (const f of spec.fields) {
+    const row = el("div", "thing-field");
+    const label = el("label", null, f.label + (f.required ? " *" : ""));
+    row.append(label);
+    // A stored secret comes back as dots; leaving them means "unchanged".
+    const control = fieldControl(f, existing?.config?.[f.name]);
+    controls[f.name] = control;
+    row.append(control);
+    if (f.help) row.append(el("div", "desc", f.help));
+    box.append(row);
+  }
+
+  const status = el("div", "status");
+  const save = el("button", "btn", existing ? "Save" : "Add");
+  save.type = "button";
+  save.addEventListener("click", async () => {
+    const config = {};
+    for (const [name, control] of Object.entries(controls)) config[name] = readControl(control);
+    save.disabled = true;
+    status.className = "status";
+    status.textContent = "saving…";
+    try {
+      if (existing) await send(`${kind}s/${existing.id}`, {name: nameInput.value, config}, "PATCH");
+      else await send(`${kind}s`, {type: spec.type, name: nameInput.value, config}, "POST");
+      box.remove();
+      loadThings(kind);
+    } catch (e) {
+      status.className = "status err";
+      status.textContent = e.message;
+      save.disabled = false;
+    }
+  });
+  const cancel = el("button", "ghost", "cancel");
+  cancel.type = "button";
+  cancel.addEventListener("click", () => box.remove());
+
+  const row = el("div", "thing-actions");
+  row.append(save, cancel, status);
+  box.append(row);
+  return box;
+}
+
+async function showTypePicker(kind) {
+  const host = $(`#${kind}-form`);
+  host.textContent = "";
+  if (!TYPES[kind]) TYPES[kind] = (await json(`${kind}s/types`)).types;
+  const box = el("div", "thing-form");
+  box.append(el("div", "thing-form-title", "What kind?"));
+  const grid = el("div", "type-grid");
+  for (const spec of TYPES[kind]) {
+    const card = el("button", "type-card");
+    card.type = "button";
+    card.append(el("b", null, spec.label));
+    if (spec.description) card.append(el("span", null, spec.description));
+    card.addEventListener("click", () => {
+      host.textContent = "";
+      host.append(buildForm(kind, spec));
+    });
+    grid.append(card);
+  }
+  box.append(grid);
+  host.append(box);
+}
+
+document.querySelectorAll("[data-add]").forEach(btn =>
+  btn.addEventListener("click", () => showTypePicker(btn.dataset.add)));
+
+async function loadThings(kind) {
+  const list = $(`#${kind}-list`);
   let data;
-  try { data = await json("cameras"); }
-  catch { list.textContent = ""; list.append(el("div", "empty", "Cameras are visible to admins only.")); return; }
-  list.textContent = "";
-  if (!data.cameras.length) {
-    list.append(el("div", "empty", "No cameras yet. Add one above with its RTSP URL."));
+  try {
+    if (!TYPES[kind]) TYPES[kind] = (await json(`${kind}s/types`)).types;
+    data = await json(`${kind}s`);
+  } catch {
+    list.textContent = "";
+    list.append(el("div", "empty", "Visible to admins only."));
     return;
   }
-  for (const cam of data.cameras) {
+  const items = data[kind + "s"] || [];
+  list.textContent = "";
+  if (!items.length) {
+    list.append(el("div", "empty", `No ${kind}s yet. Add one above.`));
+    return;
+  }
+  for (const item of items) {
+    const spec = TYPES[kind].find(t => t.type === item.type);
     const row = el("div", "mem-row");
-    row.append(el("div", "mem-text", cam.name));
-    row.append(el("div", "cam-url", cam.url));
-    const shot = el("div", "cam-shot");
-    row.append(shot);
+    const head = el("div", "thing-head");
+    head.append(el("div", "mem-text", item.name));
+    head.append(el("span", "mem-kind", item.label || item.type));
+    if (!item.enabled) head.append(el("span", "thing-off", "disabled"));
+    row.append(head);
+
+    const summary = Object.entries(item.config)
+      .filter(([, v]) => v !== "" && v !== null && v !== undefined)
+      .map(([k, v]) => `${k}: ${v}`).join("  ·  ");
+    if (summary) row.append(el("div", "cam-url", summary));
+
+    const out = el("div", "cam-shot");
+    row.append(out);
     const meta = el("div", "mem-meta");
 
-    const look = el("button", "ghost", "look");
-    look.type = "button";
-    look.addEventListener("click", async () => {
-      look.disabled = true;
-      look.textContent = "looking…";
-      shot.textContent = "";
-      try {
-        const img = document.createElement("img");
-        img.alt = `Current view from ${cam.name}`;
-        // Cache-busted, or the browser shows the frame from the last time you looked.
-        img.src = `cameras/${cam.id}/snapshot?t=${Date.now()}`;
-        shot.append(img);
-        const d = await json(`cameras/${cam.id}/describe`);
-        shot.append(el("div", "cam-desc", d.description));
-      } catch (e) {
-        shot.append(el("div", "cam-desc", "Could not reach it: " + e.message));
-      }
-      look.textContent = "look";
-      look.disabled = false;
+    for (const action of spec?.actions || []) {
+      const btn = el("button", "ghost", action.label);
+      btn.type = "button";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const was = btn.textContent;
+        btn.textContent = "…";
+        out.textContent = "";
+        try {
+          const r = await send(`${kind}s/${item.id}/${action.name}`, {}, "POST");
+          renderActionResult(out, r);
+        } catch (e) {
+          out.append(el("div", "cam-desc", e.message));
+        }
+        btn.textContent = was;
+        btn.disabled = false;
+      });
+      meta.append(btn);
+    }
+
+    const edit = el("button", "ghost", "edit");
+    edit.type = "button";
+    edit.addEventListener("click", () => {
+      const host = $(`#${kind}-form`);
+      host.textContent = "";
+      host.append(buildForm(kind, spec, item));
     });
-    meta.append(look);
+    meta.append(edit);
+
+    const toggle = el("button", "ghost", item.enabled ? "disable" : "enable");
+    toggle.type = "button";
+    toggle.addEventListener("click", async () => {
+      toggle.disabled = true;
+      await send(`${kind}s/${item.id}`, {enabled: !item.enabled}, "PATCH");
+      loadThings(kind);
+    });
+    meta.append(toggle);
 
     const del = el("button", "ghost", "remove");
     del.type = "button";
-    del.style.marginLeft = "0";
     del.addEventListener("click", async () => {
       del.disabled = true;
-      await json("cameras/" + cam.id, {method: "DELETE"});
-      loadCameras();
+      await json(`${kind}s/${item.id}`, {method: "DELETE"});
+      loadThings(kind);
     });
     meta.append(del);
     row.append(meta);
@@ -1098,20 +1314,28 @@ async function loadCameras() {
   }
 }
 
-$("#cam-add").addEventListener("click", async () => {
-  const name = $("#cam-name").value.trim(), url = $("#cam-url").value.trim();
-  if (!name || !url) return;
-  $("#cam-add").disabled = true;
-  try {
-    await send("cameras", {name, url}, "POST");
-    $("#cam-name").value = "";
-    $("#cam-url").value = "";
-  } catch (e) {
-    $("#cam-note").textContent = "Could not add: " + e.message;
+/* Actions return whatever suits them; show an image as an image, a list as a list,
+   and anything else as readable text rather than raw JSON. */
+function renderActionResult(into, result) {
+  if (result.image) {
+    const img = document.createElement("img");
+    img.src = result.image;
+    img.alt = "Camera view";
+    into.append(img);
   }
-  $("#cam-add").disabled = false;
-  loadCameras();
-});
+  if (result.description) into.append(el("div", "cam-desc", result.description));
+  if (result.transcript !== undefined)
+    into.append(el("div", "cam-desc", result.transcript || result.detail || "nothing audible"));
+  if (Array.isArray(result.messages)) {
+    if (!result.messages.length) into.append(el("div", "cam-desc", "Nothing new."));
+    for (const m of result.messages)
+      into.append(el("div", "cam-desc", `${m.from} — ${m.subject}`));
+  }
+  if (result.ok !== undefined)
+    into.append(el("div", "cam-desc", result.ok ? `Delivered (HTTP ${result.status}).`
+                                                : `Rejected (HTTP ${result.status}).`));
+  if (!into.children.length) into.append(el("div", "cam-desc", "Done."));
+}
 
 /* -------------------------------------------------------------- memory -- */
 async function loadMemories() {

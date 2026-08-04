@@ -23,10 +23,13 @@ import auth
 import backup
 import cameras
 import chat
+import devices
 import files
+import integrations
 import memory
 import persona
 import places
+import registry
 import reasoning
 import settings
 import voice
@@ -87,7 +90,7 @@ async def lifespan(app: FastAPI):
     await auth.init()
     await activity.init()
     await chat.init()
-    await cameras.init()
+    await registry.init()
     asyncio.create_task(backup.scheduler())
     asyncio.create_task(memory.compactor())
     yield
@@ -117,7 +120,8 @@ app.include_router(files.router)  # same
 app.include_router(wake.router)
 app.include_router(memory.router)
 app.include_router(backup.router)
-app.include_router(cameras.router)
+app.include_router(registry.make_router('device'))
+app.include_router(registry.make_router('integration'))
 app.include_router(places.router)
 
 
@@ -125,6 +129,12 @@ class InferRequest(BaseModel):
     messages: list[dict]
     model: str | None = None
     think: bool | None = None
+
+
+@app.get("/commands")
+async def commands(_: dict = Depends(auth.active_user)):
+    """The composer's quick-command menu, built from what is switched on."""
+    return {"commands": reasoning.quick_commands()}
 
 
 @app.get("/healthz")

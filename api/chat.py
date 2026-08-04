@@ -41,6 +41,9 @@ class Send(BaseModel):
     content: str = Field(min_length=1)
     conversation_id: str | None = None
     think: bool | None = None
+    # A quick command selected in the composer. Steers the turn; never stored, so
+    # the transcript reads as what the user actually typed.
+    command: str | None = None
     # [{name, kind, text}] from /files/analyze. Stored alongside the message so the
     # model still has the file on later turns, and the UI can show it collapsed.
     attachments: list[dict] | None = None
@@ -133,6 +136,11 @@ async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
     history = await _load(uid, cid) if body.conversation_id else []
     history.append(_user_message(body))
     title = None if body.conversation_id else body.content.strip()[:60]
+    if body.command:
+        # Applied to the copy the model sees, not to what is stored.
+        history = history[:-1] + [{**history[-1],
+                                   "content": reasoning.apply_command(body.command,
+                                                                      body.content)}]
 
     async def events():
         yield json.dumps({"type": "start", "conversation_id": cid}) + "\n"

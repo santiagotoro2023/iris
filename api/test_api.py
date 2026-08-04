@@ -14,6 +14,7 @@ import main
 import persona
 import places
 import reasoning
+import registry
 import settings
 import backup
 import cameras
@@ -458,6 +459,68 @@ def test_journey_duration_is_readable_aloud():
     assert places._minutes("00dxx:yy:00") == "00dxx:yy:00"   # shaped but unparseable
 
 
+def test_secret_fields_never_reach_a_client():
+    """The registry is the single place credentials could leak from, since every
+    device and integration goes through it."""
+    import datetime
+    spec = registry.spec_for("integration", "mailbox")
+    row = (1, "integration", "mailbox", "work",
+           {"host": "imap.example.com", "username": "u", "password": "s3cret"},
+           True, datetime.datetime(2026, 8, 4, tzinfo=datetime.timezone.utc))
+
+    public = registry._row(row, redact=True)
+    assert public["config"]["password"] == registry.MASK
+    assert "s3cret" not in json.dumps(public)
+    # Non-secret fields must survive, or the UI cannot show what is configured.
+    assert public["config"]["host"] == "imap.example.com"
+
+    internal = registry._row(row, redact=False)
+    assert internal["config"]["password"] == "s3cret"
+    assert spec.fields[0].name == "host"
+
+
+def test_editing_without_retyping_a_secret_keeps_it():
+    """The form sends back the dots it was shown. Taking those literally would
+    silently replace every password with bullet characters."""
+    spec = registry.spec_for("integration", "mailbox")
+    stored = {"host": "a", "username": "u", "password": "s3cret", "port": 993}
+    incoming = {"host": "b", "password": registry.MASK}
+    kept = {k: v for k, v in incoming.items() if v != registry.MASK}
+    merged = registry.validate(spec, {**stored, **kept})
+    assert merged["password"] == "s3cret"
+    assert merged["host"] == "b"
+
+
+def test_a_port_is_an_integer_not_a_float():
+    """993.0 is not a port, and imaplib will not accept it."""
+    spec = registry.spec_for("integration", "mailbox")
+    out = registry.validate(spec, {"host": "h", "username": "u", "password": "p",
+                                   "port": "993"})
+    assert out["port"] == 993 and isinstance(out["port"], int)
+
+
+def test_unknown_type_names_the_ones_that_exist():
+    try:
+        registry.spec_for("device", "toaster")
+    except Exception as e:
+        assert "camera" in str(e.detail), e.detail
+    else:
+        raise AssertionError("an unknown type must be rejected")
+
+
+def test_quick_commands_hide_what_is_switched_off():
+    """A command that steers at a disabled tool would produce an apology, not an
+    answer."""
+    with patch.dict(settings._overrides, {"location.enabled": False}):
+        names = {c["name"] for c in reasoning.quick_commands()}
+    assert "transit" not in names and "find" not in names, names
+    assert "search" in names
+    assert reasoning.apply_command("search", "debian").endswith("debian")
+    assert "Search the web" in reasoning.apply_command("search", "debian")
+    # An unknown command must pass the text through untouched, not mangle the turn.
+    assert reasoning.apply_command("nonsense", "hello") == "hello"
+
+
 def test_camera_passwords_are_never_exposed():
     """A camera password is typically reused across a household's devices, so it must
     not reach a browser, the activity log, or a model's context. Punctuation in the
@@ -479,11 +542,14 @@ def test_camera_passwords_are_never_exposed():
             assert secret not in masked or secret in raw.split("@")[-1], (raw, masked)
 
 
-def test_a_camera_row_sent_to_a_client_carries_no_password():
-    import datetime
-    row = (3, "front door", "rtsp://admin:hunter2@10.0.0.5/stream", True,
-           datetime.datetime(2026, 8, 4, tzinfo=datetime.timezone.utc))
-    assert "hunter2" not in json.dumps(cameras._public(row))
+def test_ffmpeg_errors_do_not_echo_the_stream_password():
+    """ffmpeg prints the whole URL back on failure, so its stderr is masked before
+    it reaches an error message. Cameras store their URL as a secret field now, so
+    this is the remaining path a password could escape by."""
+    stderr = ("rtsp://admin:hunter2@10.0.0.5/stream: Connection refused\n"
+              "Error opening input file rtsp://admin:hunter2@10.0.0.5/stream.")
+    assert "hunter2" not in cameras.mask(stderr)
+    assert "10.0.0.5" in cameras.mask(stderr)      # still diagnosable
 
 
 def test_backup_delete_cannot_escape_the_backup_directory():

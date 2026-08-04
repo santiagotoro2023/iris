@@ -10,27 +10,24 @@ tuning, a hardware-acceleration decision and the actual camera inventory, none o
 which can be guessed. §30 records what is still open.
 
 Stream URLs carry credentials, so they are admin-only and never leave this service
-intact: everything that goes to a client has the password masked.
+intact: the registry redacts secret fields and ffmpeg's own error text is masked.
+
+Cameras are one device *type* (SPEC.md 33) rather than a table of their own, so a
+microphone or anything later is the same machinery with different fields.
 """
 import asyncio
+import base64
 import os
 import re
 import time
 
-import psycopg
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from fastapi import HTTPException
 
-import activity
-import auth
 import files
+import registry
 import settings
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
 SNAPSHOT_TIMEOUT = 25
-
-router = APIRouter(prefix="/cameras", tags=["cameras"])
 
 settings.setting(
     "cameras.enabled", type="boolean", default=True,
@@ -51,62 +48,16 @@ settings.setting(
                 "this window the last frame is reused instead of fetching another.")
 
 
-# ---------------------------------------------------------------- storage ----
-
-async def _connect():
-    return await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=True)
-
-
-async def init() -> None:
-    async with await _connect() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS cameras (
-                id       BIGSERIAL PRIMARY KEY,
-                name     TEXT NOT NULL UNIQUE,
-                url      TEXT NOT NULL,
-                enabled  BOOLEAN NOT NULL DEFAULT TRUE,
-                created  TIMESTAMPTZ NOT NULL DEFAULT now()
-            )""")
-
-
-# Greedy to the LAST @ in the authority: a password containing : or @ is legal and
-# common, and a lazy match leaks the tail of it ("user:____@ss:word@host").
+# Credentials in a stream URL are usually reused across a household's devices, so
+# they must not reach a browser, the activity log, or a model's context. Greedy to
+# the LAST @ in the authority: a password containing : or @ is legal and common, and
+# a lazy match leaks the tail of it ("user:____@ss:word@host").
 _CREDENTIALS = re.compile(r"(?<=://)([^/]*?):([^/]*)@")
 
 
 def mask(url: str) -> str:
-    """rtsp://user:hunter2@host/stream -> rtsp://user:____@host/stream
-
-    Camera passwords are usually reused across a household's devices, so they must
-    not travel to a browser, into the activity log, or into a model's context.
-    """
+    """rtsp://user:hunter2@host/stream -> rtsp://user:____@host/stream"""
     return _CREDENTIALS.sub(lambda m: f"{m.group(1)}:____@", url)
-
-
-def _public(row: tuple) -> dict:
-    return {"id": row[0], "name": row[1], "url": mask(row[2]), "enabled": row[3],
-            "created": row[4].timestamp()}
-
-
-async def listing() -> list[dict]:
-    async with await _connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT id, name, url, enabled, created FROM cameras "
-                              "ORDER BY name")
-            return [_public(r) for r in await cur.fetchall()]
-
-
-async def _url_for(name_or_id: str) -> tuple[str, str]:
-    async with await _connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT name, url FROM cameras WHERE enabled AND "
-                "(lower(name) = lower(%s) OR id::text = %s)",
-                (name_or_id, name_or_id))
-            row = await cur.fetchone()
-    if not row:
-        raise HTTPException(404, f"no enabled camera called {name_or_id!r}")
-    return row[0], row[1]
 
 
 # --------------------------------------------------------------- capture ----
@@ -154,58 +105,44 @@ async def describe(name_or_id: str) -> dict:
     return {"camera": name, "description": text, "bytes": len(frame)}
 
 
-# ------------------------------------------------------------------ http ----
+# ------------------------------------------------------------ as a device ----
 
-class NewCamera(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    url: str = Field(min_length=1, max_length=500)
-    enabled: bool = True
-
-
-_admin = auth.require_role("creator", "admin")
+async def _describe_action(thing: dict, user: dict | None = None) -> dict:
+    url = thing["config"].get("url", "")
+    frame = await snapshot(thing["name"], url)
+    text = await files._describe_image(frame, settings.get("cameras.prompt"))
+    return {"camera": thing["name"], "description": text, "bytes": len(frame)}
 
 
-@router.get("")
-async def get_all(_: dict = Depends(_admin)):
-    return {"cameras": await listing()}
+async def _snapshot_action(thing: dict, user: dict | None = None) -> dict:
+    """Returned as a data URI so the generic device UI needs no special case for it."""
+    frame = await snapshot(thing["name"], thing["config"].get("url", ""))
+    return {"image": "data:image/jpeg;base64," + base64.b64encode(frame).decode()}
 
 
-@router.post("")
-async def add(body: NewCamera, user: dict = Depends(_admin)):
-    if not body.url.startswith(("rtsp://", "rtsps://", "http://", "https://")):
-        raise HTTPException(400, "expected an rtsp:// or http:// stream URL")
-    try:
-        async with await _connect() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "INSERT INTO cameras (name, url, enabled) VALUES (%s, %s, %s) "
-                    "RETURNING id, name, url, enabled, created",
-                    (body.name.strip(), body.url.strip(), body.enabled))
-                row = await cur.fetchone()
-    except psycopg.errors.UniqueViolation:
-        raise HTTPException(409, f"a camera called {body.name!r} already exists")
-    await activity.record("camera.add", body.name, user["username"])
-    return _public(row)
+registry.register(registry.Type(
+    kind="device", name="camera", label="Camera",
+    description="An RTSP or HTTP camera. IRiS can look at it and say what it sees.",
+    fields=[
+        registry.Field("url", "Stream URL", type="password", required=True,
+                       secret=True,
+                       help="rtsp://user:password@host:554/stream, or the "
+                            "http://host/snapshot.jpg endpoint many cameras expose."),
+    ],
+    actions={"describe": _describe_action, "snapshot": _snapshot_action},
+    action_labels={"describe": "look", "snapshot": "snapshot"},
+))
 
 
-@router.delete("/{camera_id}")
-async def remove(camera_id: int, user: dict = Depends(_admin)):
-    async with await _connect() as conn:
-        await conn.execute("DELETE FROM cameras WHERE id = %s", (camera_id,))
-    await activity.record("camera.remove", str(camera_id), user["username"])
-    return {"ok": True}
+async def describe(name_or_id: str) -> dict:
+    """Used by the look_at_camera tool."""
+    thing = await registry.get("device", name_or_id, redact=False)
+    if thing["type"] != "camera":
+        raise HTTPException(400, f"{thing['name']} is not a camera")
+    if not thing["enabled"]:
+        raise HTTPException(409, f"{thing['name']} is disabled")
+    return await _describe_action(thing)
 
 
-@router.get("/{camera_id}/snapshot")
-async def frame(camera_id: str, _: dict = Depends(_admin)):
-    name, url = await _url_for(camera_id)
-    return Response(await snapshot(name, url), media_type="image/jpeg",
-                    headers={"cache-control": "no-store"})
-
-
-@router.get("/{camera_id}/describe")
-async def look(camera_id: str, user: dict = Depends(_admin)):
-    out = await describe(camera_id)
-    await activity.record("camera.look", f"{out['camera']}: {out['description'][:120]}",
-                          user["username"])
-    return out
+async def camera_names() -> list[str]:
+    return [c["name"] for c in await registry.enabled_of_type("device", "camera")]

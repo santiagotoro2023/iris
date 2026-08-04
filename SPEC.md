@@ -1329,3 +1329,64 @@ touch this will hit exactly the same wall.
 
 Every corpus fetch is now individually non-fatal: one unavailable dataset was
 throwing away a 17.3 GB download that had already succeeded.
+
+
+## 33. Devices, Integrations and Quick Commands
+
+Santiago, verbatim:
+
+> Cameras should be able to be dynamically added under a new tab called devices where
+> you click add and select the type of device (to support microphones, cameras, later
+> other devices etc.)
+
+> there should also be a new tab integrations where you can similar to the devices tab
+> add a integration of some type like whatsapp email etc. to add credentials and
+> whatever is required for the type etc.
+
+> for things like transit maybe add buttons to the UI like next to the attach thing a
+> button for quick commands where you can select it, type a text and the model makes
+> the best decisions it can based on the quick command selected etc. just basically
+> make everything dynamic and more expandable for more featuers down the road
+
+**One registry, two kinds.** `api/registry.py` stores typed instances in a single
+`things` table keyed by `(kind, name)`. A type declares its fields; the API validates
+against that declaration and the UI *renders the form from it*. `make_router(kind)`
+produces the whole REST surface, so devices and integrations are the same code with a
+different word. Adding a type is one `register(...)` call: no endpoint, no form, no
+list rendering, no audit wiring. This is deliberately the same bargain
+`settings.setting(...)` already makes for single values.
+
+Types today: **camera** and **microphone** (devices), **mailbox** and **webhook**
+(integrations). The camera moved off its own table; existing rows are migrated in
+`init()` rather than orphaned.
+
+**Secrets.** A field marked `secret` is returned as `••••••••` and never otherwise.
+Sending the mask back means *unchanged*, so editing a mailbox's host does not require
+retyping its password — taking the dots literally would silently replace every
+credential with bullet characters, which is the bug this design exists to prevent, and
+it has a test. ponytail: stored as given in Postgres, on a gitignored volume whose
+backups are AES encrypted; a key-wrapped column is the upgrade if this ever holds more
+than a home camera password.
+
+**Mailbox is real, not a placeholder.** IMAP is in the standard library, so it needs
+no dependency and works today with an app password. Headers only: the body of every
+message is a lot of text to put in front of a model that was asked "any new mail".
+Microsoft Graph and Gmail's own APIs (§5) buy push and richer search at the cost of an
+OAuth app registration each, which is a decision, not work.
+
+**Microphone reuses what already existed.** ffmpeg is here for cameras and pulls audio
+identically; the transcript goes through the ingestion path recordings already take
+(§29). A device type that did nothing would have been dead weight, so it does the
+thing the pipeline already supports.
+
+**Quick commands** are a directive prepended to the turn — enough to aim an 8B model
+at the right tool without taking the decision away from it. Applied to the copy the
+model sees, never to the stored transcript, so the conversation reads as what was
+actually typed. Commands whose feature is off are not offered at all, since steering
+at a disabled tool produces an apology rather than an answer.
+
+Verified against the live server exactly as the browser drives it: both type lists,
+creation with a secret that does not appear in the response, an edit that keeps the
+password while changing the host, `400` for an unknown type, `400` for a missing
+required field, `409` for a duplicate name, and the command list shrinking when a
+feature is disabled.

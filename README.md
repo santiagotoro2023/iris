@@ -230,22 +230,50 @@ count and whether to include conversations are all settings; the Memory tab has 
 > sync you like covers that: an rsync cron to a NAS, a Tailscale copy to another
 > node, or an external drive.
 
-## Cameras
+## Devices and integrations
 
-Add a camera in the **Cameras** tab with its stream URL (`rtsp://…`, or the
-`http://…/snapshot.jpg` endpoint many cameras expose). *look* pulls a frame and has
-the vision model describe it, and IRiS gets a `look_at_camera` tool, so "is anyone at
-the front door?" works in chat.
+Two tabs, one mechanism. **Devices** are things in the house; **Integrations** are
+accounts and services. Both work the same way: press *add*, pick a type, fill in the
+form the type declares, and the instance appears with whatever actions that type
+supports.
 
-Stream URLs contain credentials, so cameras are admin-only and the password is masked
-in everything that leaves the server — the browser, the activity log, and ffmpeg's own
-error text, which otherwise echoes the URL back verbatim. A frame is reused for 10
-seconds by default rather than waking the camera again.
+| | types today | actions |
+|---|---|---|
+| Devices | Camera, Microphone | *look*, *snapshot*, *listen* |
+| Integrations | Mailbox (IMAP), Webhook | *check mail*, *send a test* |
+
+A **camera** takes an `rtsp://…` URL or the `http://…/snapshot.jpg` endpoint many
+cameras expose; *look* pulls a frame and describes it, and IRiS gets a
+`look_at_camera` tool so "is anyone at the front door?" works in chat. A
+**microphone** records a span of a network audio stream, transcribes it, and files it
+in memory. A **mailbox** is any IMAP server — Outlook, Gmail with an app password, or
+your own — and gives IRiS a `check_mail` tool.
+
+Credentials never come back out. A secret field is stored on this machine and
+returned to the browser as dots; sending the dots back means "unchanged", so editing a
+mailbox's server does not require retyping its password. ffmpeg's error text is masked
+too, since it echoes the whole URL on failure.
+
+> **Adding a type costs one `register(...)` call and no client work.** The form, the
+> validation, the list, the action buttons and the audit entries are all generic. That
+> is the point of the split: the next device or integration is a declaration, not a
+> feature.
 
 > Frigate — continuous recording, motion and object detection, event history — is
 > [SPEC.md §5](./SPEC.md)'s choice for the NVR half and is **not built yet**. It needs
 > per-camera tuning, a hardware-acceleration decision and the actual camera inventory.
-> Looking on demand needs none of that, which is why it came first.
+
+## Quick commands
+
+The lightning button in the composer picks a command — *Transit*, *Look at a camera*,
+*Check mail*, *Search the web*, *Remember this*, *Find a place* — and a chip appears
+above the box. What you type is then aimed at the right tool without the decision
+being taken away from the model. The command applies to one turn and clears itself,
+and the transcript stores what you actually typed, not the directive.
+
+Commands whose feature is switched off do not appear, because a command that steers at
+a disabled tool produces an apology rather than an answer. Adding one is a dict entry
+in `reasoning.QUICK_COMMANDS`; the menu is built from the server.
 
 ## Settings
 

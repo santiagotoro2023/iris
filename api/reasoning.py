@@ -42,6 +42,69 @@ SEARCH_POLICY = {
 # name -> (ollama tool schema, callable). Later phases register integrations here.
 TOOLS: dict[str, tuple[dict, callable]] = {}
 
+# Quick commands (SPEC.md 33). A directive prepended to the turn, which is enough to
+# aim an 8B model at the right tool without taking the decision away from it. Adding
+# one is a dict entry: the UI builds its menu from /commands.
+QUICK_COMMANDS: dict[str, dict] = {
+    "transit": {
+        "label": "Transit",
+        "hint": "where to, or where from and to",
+        "directive": "Use the transit and departures tools to answer this. If only "
+                     "one place is given, treat it as the destination and start from "
+                     "home. Give times, not prose.",
+        "needs": "location.enabled",
+    },
+    "camera": {
+        "label": "Look at a camera",
+        "hint": "which camera, or what you want to know",
+        "directive": "Use look_at_camera. If no camera is named and only one is set "
+                     "up, use that one. Report what is actually visible, briefly.",
+        "needs": "cameras.enabled",
+    },
+    "mail": {
+        "label": "Check mail",
+        "hint": "optional: what you are looking for",
+        "directive": "Use check_mail. Summarise who wrote and what about, one line "
+                     "each. Do not invent messages that are not listed.",
+    },
+    "search": {
+        "label": "Search the web",
+        "hint": "what to look up",
+        "directive": "Search the web for this before answering. Do not answer from "
+                     "memory, and cite what you found.",
+    },
+    "remember": {
+        "label": "Remember this",
+        "hint": "what IRiS should keep",
+        "directive": "Store this with the remember tool, exactly as the user means "
+                     "it, then confirm in one short sentence.",
+    },
+    "find": {
+        "label": "Find a place",
+        "hint": "what to find, e.g. a pharmacy",
+        "directive": "Use find_place. Give names and streets, nearest first.",
+        "needs": "location.enabled",
+    },
+}
+
+
+def quick_commands() -> list[dict]:
+    """Only the ones whose feature is actually switched on."""
+    out = []
+    for name, spec in QUICK_COMMANDS.items():
+        need = spec.get("needs")
+        if need and not settings.get(need):
+            continue
+        out.append({"name": name, "label": spec["label"], "hint": spec["hint"]})
+    return out
+
+
+def apply_command(name: str, text: str) -> str:
+    spec = QUICK_COMMANDS.get(name)
+    if not spec:
+        return text
+    return f"{spec['directive']}\n\n{text}"
+
 
 def tool(name: str, description: str, parameters: dict):
     schema = {"type": "function",
@@ -99,6 +162,16 @@ async def _recall(query: str):
     if not hits:
         return f"Nothing remembered about {query!r}."
     return "\n".join(f"- {h['text']}" for h in hits)
+
+
+@tool("check_mail",
+      "Look in the user's configured mailboxes and report what has arrived. Use this "
+      "for any question about email, messages waiting, or whether someone has "
+      "replied.",
+      {"type": "object", "properties": {}})
+async def _check_mail():
+    import integrations
+    return await integrations.check_all_mail()
 
 
 @tool("transit",
