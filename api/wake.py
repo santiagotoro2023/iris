@@ -91,15 +91,15 @@ settings.setting(
     title="Hands-free listening", order=5,
     description="Keep the microphone open and wait for the wake word.")
 settings.setting(
-    "voice.wake_model", type="string", enum=_wake_models, default="computer",
+    "voice.wake_model", type="string", enum=_wake_models, default="hey_iris",
     title="Wake word", order=6,
-    description="Which phrase wakes IRiS. 'computer' is the most reliable. "
-                "'hey_iris' works too, with sensitivity raised to about 0.85.")
+    description="Which phrase wakes IRiS. 'hey_iris' was trained for this; "
+                "'computer' is a fallback that needs no tuning.")
 settings.setting(
-    "voice.wake_sensitivity", type="number", minimum=0.1, maximum=0.95, default=0.5,
+    "voice.wake_sensitivity", type="number", minimum=0.1, maximum=0.95, default=0.85,
     title="Wake word sensitivity", order=7,
-    description="Lower wakes more readily and misfires more. 0.5 suits 'computer'; "
-                "'hey iris' needs about 0.85.")
+    description="Lower wakes more readily and misfires more. 0.85 suits 'hey iris'; "
+                "'computer' works down at 0.5.")
 settings.setting(
     "voice.end_silence", type="number", minimum=0.3, maximum=3.0, default=0.8,
     title="End of turn silence (seconds)",

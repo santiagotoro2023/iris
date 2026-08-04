@@ -168,6 +168,32 @@ def _spell_acronym(m: re.Match) -> str:
     return word
 
 
+_UNITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+          "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+          "sixteen", "seventeen", "eighteen", "nineteen"]
+_TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty"}
+_CLOCK = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+
+
+def _spoken_number(n: int) -> str:
+    if n < 20:
+        return _UNITS[n]
+    tens, unit = divmod(n, 10)
+    return _TENS[tens] + (f" {_UNITS[unit]}" if unit else "")
+
+
+def _spoken_clock(m: re.Match) -> str:
+    """07:23 read as "zero seven twenty three" is not how anyone says a time."""
+    hour, minute = int(m.group(1)), int(m.group(2))
+    suffix = "AM" if hour < 12 else "PM"
+    twelve = hour % 12 or 12
+    if minute == 0:
+        return f"{_spoken_number(twelve)} o'clock {suffix}"
+    if minute < 10:
+        return f"{_spoken_number(twelve)} oh {_spoken_number(minute)} {suffix}"
+    return f"{_spoken_number(twelve)} {_spoken_number(minute)} {suffix}"
+
+
 def speech_text(text: str) -> str:
     """Turn a written reply into something worth listening to."""
     text = _CODE_FENCE.sub(" ", text)
@@ -181,6 +207,8 @@ def speech_text(text: str) -> str:
     text = _ORDERED.sub(r"\1, ", text)
     text = _LEFTOVER_MD.sub(" ", text)
 
+    # Before the acronym pass, which would otherwise see the AM/PM this adds.
+    text = _CLOCK.sub(_spoken_clock, text)
     text = _ACRONYM.sub(_spell_acronym, text)
 
     # "CubeServ AG (a Swiss firm)" ran straight into the bracket with no breath.

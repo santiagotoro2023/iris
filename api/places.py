@@ -11,6 +11,8 @@ whole point (SPEC.md 3.1: everything configurable is configurable in the UI).
 import asyncio
 import os
 import time
+from math import asin, cos, radians, sin, sqrt
+from urllib.parse import quote_plus
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -124,12 +126,21 @@ def _minutes(duration: str | None) -> str:
     return f"{total // 60}h {total % 60:02d}"
 
 
+def maps_link(origin: str, destination: str) -> str:
+    """A link he can open and check, which is the point of showing the sources."""
+    return ("https://www.google.com/maps/dir/?api=1&travelmode=transit"
+            f"&origin={quote_plus(origin)}&destination={quote_plus(destination)}")
+
+
 async def journey(origin: str, destination: str, when: str | None = None) -> str:
     origin, destination = await resolve(origin), await resolve(destination)
     if not origin:
         return ("I do not know where you are. Set Home in Settings, or allow location "
                 "in the browser.")
-    params = {"from": origin, "to": destination, "limit": 4}
+    # Two is what somebody asked "when is the next bus" actually wants. A named time
+    # means they are planning, so show more.
+    limit = 4 if when else 2
+    params = {"from": origin, "to": destination, "limit": limit}
     if when:
         params["time"] = when
     async with httpx.AsyncClient(timeout=20) as c:
@@ -145,16 +156,20 @@ async def journey(origin: str, destination: str, when: str | None = None) -> str
         dep, arr = conn.get("from", {}), conn.get("to", {})
         changes = conn.get("transfers")
         platform = (dep.get("platform") or "").strip()
+        # Departure AND arrival, spelled out: "20:09 to 20:28" was being relayed as a
+        # departure with no arrival at all.
         lines.append(
-            f"- {_clock(dep.get('departure'))} to {_clock(arr.get('arrival'))}"
-            f", {_minutes(conn.get('duration'))}"
+            f"- departs {_clock(dep.get('departure'))}, "
+            f"arrives {_clock(arr.get('arrival'))}, "
+            f"{_minutes(conn.get('duration'))}"
             + (f", platform {platform}" if platform else "")
             + (", direct" if changes == 0 else f", {changes} change"
                + ("s" if changes and changes > 1 else "")))
+    lines.append(f"- Full route: {maps_link(origin, destination)}")
     return "\n".join(lines)
 
 
-async def departures(station: str = "", limit: int = 6) -> str:
+async def departures(station: str = "", limit: int = 4) -> str:
     station = await resolve(station)
     if not station:
         return ("I do not know where you are. Name a stop, set Home in Settings, or "
@@ -169,7 +184,7 @@ async def departures(station: str = "", limit: int = 6) -> str:
         return f"No departures listed for {station!r}. Check the stop name."
     name = (r.json().get("station") or {}).get("name") or station
     lines = [f"Departures from {name}:"]
-    for item in board:
+    for item in board[:limit]:
         stop = item.get("stop") or {}
         delay = stop.get("delay")
         service = f"{item.get('category', '')}{item.get('number', '')}".strip()
@@ -313,6 +328,72 @@ async def weather(place: str = "") -> str:
 
 _last_nominatim = 0.0
 _nominatim_lock = asyncio.Lock()
+
+
+def _haversine(a: tuple[float, float], b: tuple[float, float]) -> int:
+    """Metres between two coordinates, for "how far is the walk"."""
+    lat1, lon1, lat2, lon2 = map(radians, (a[0], a[1], b[0], b[1]))
+    h = (sin((lat2 - lat1) / 2) ** 2
+         + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2)
+    return int(2 * 6371000 * asin(sqrt(h)))
+
+
+def _walk(metres: int) -> str:
+    minutes = max(1, round(metres / 80))       # ~4.8 km/h
+    return f"{metres} m, about {minutes} min on foot"
+
+
+async def route_to(place: str) -> str:
+    """How to actually get somewhere: find it, then plan public transport to it and
+    say how far the walk is. Public transport is the default because that is what
+    "how do I get there" means to somebody who asked it here.
+    """
+    hit = await _lookup(place)
+    if not hit:
+        # The map does not know every small company, but the timetable knows towns.
+        # Planning to the place as named beats refusing outright.
+        origin = await nearest_stop() or settings.get("location.home")
+        if origin:
+            return (f"The map does not list {place!r}, so this is the journey to it "
+                    f"as named.\n" + await journey(origin, place))
+        return f"I could not find {place!r} on the map."
+    label = hit["display_name"].split(",")[0]
+    town = (hit.get("address", {}).get("town")
+            or hit.get("address", {}).get("village")
+            or hit.get("address", {}).get("city") or "")
+    target = (float(hit["lat"]), float(hit["lon"]))
+
+    lines = [f"{label}" + (f", {town}" if town else "") + ".",
+             f"Address: {hit['display_name']}"]
+
+    here = _fixed_coordinates()
+    if here:
+        lines.append(f"Straight-line distance from you: {_haversine(here, target)} m.")
+    origin = await nearest_stop() or settings.get("location.home")
+    destination = f"{label}, {town}" if town else label
+    if origin:
+        lines.append("")
+        lines.append(await journey(origin, destination))
+    lines.append(f"- On the map: https://www.google.com/maps/search/"
+                 f"?api=1&query={quote_plus(hit['display_name'])}")
+    return "\n".join(lines)
+
+
+async def _lookup(query: str) -> dict | None:
+    where = settings.get("location.home") or settings.get("location.region")
+    async with _nominatim_lock:
+        global _last_nominatim
+        wait = NOMINATIM_MIN_INTERVAL - (time.monotonic() - _last_nominatim)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(NOMINATIM_URL,
+                            params={"q": f"{query} {where}".strip(), "format": "json",
+                                    "limit": 1, "addressdetails": 1},
+                            headers={"User-Agent": USER_AGENT})
+        _last_nominatim = time.monotonic()
+    results = r.json() if r.status_code == 200 else []
+    return results[0] if results else None
 
 
 async def find_place(query: str, near: str = "") -> str:

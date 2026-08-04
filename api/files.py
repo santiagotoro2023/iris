@@ -14,6 +14,7 @@ import base64
 import io
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -36,7 +37,17 @@ TEXT_SUFFIXES = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".ini"
 
 # Uploads live here so an analyser can be run again with a different question.
 UPLOADS = Path(os.environ.get("UPLOAD_DIR", "/media/uploads"))
-MAX_VIDEO_BYTES = 500 * 1024 * 1024
+# No fixed cap: the only real limit is somewhere to put it. A margin is kept so an
+# upload cannot fill the disk the databases live on.
+DISK_MARGIN_BYTES = 5 * 1024 * 1024 * 1024
+
+
+def _room_for(size: int) -> bool:
+    try:
+        free = shutil.disk_usage(UPLOADS if UPLOADS.is_dir() else "/").free
+    except OSError:
+        return True
+    return size + DISK_MARGIN_BYTES < free
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -121,8 +132,8 @@ async def analyze(file: UploadFile = File(...),
     ctype = (file.content_type or "").split(";")[0]
     suffix = "." + lower.rsplit(".", 1)[-1] if "." in lower else ""
     is_video = suffix in VIDEO_SUFFIXES or ctype.startswith("video/")
-    if len(data) > (MAX_VIDEO_BYTES if is_video else MAX_BYTES):
-        raise HTTPException(413, "file too large")
+    if not _room_for(len(data)):
+        raise HTTPException(413, f"no room for {len(data) // 2**20} MB on the disk")
 
     path = keep(name, data)
 

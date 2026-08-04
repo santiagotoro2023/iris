@@ -1579,3 +1579,64 @@ rather than trusting it:
    all, the model stopped mentioning the weather and the train entirely. The notes now
    carry titles only; the links stay in the attached sources where they belong. This is
    the same lesson as §34: give the model less to weigh, not firmer instructions.
+
+
+## 41. Memory Was Learning the Wrong Things
+
+Santiago's memory list, after a day of use, held: last night's departure times, three
+facts about a company IRiS had looked up, and two preferences he never expressed
+("the user prefers Cafe Oase as the only option near Gusch", from a single question
+about coffee). His diagnosis was right and the cause was mine.
+
+**The assistant was its own witness.** §27 requires every fact to carry a quote, and
+verifies the quote against the exchange. The exchange *includes IRiS's own reply*, so
+anything it had just said counted as evidence. The quote must come from the USER's
+words alone, and the assistant's turn is now context rather than a source. That alone
+removes the company facts and the timetables.
+
+**Volatile facts are refused outright.** A store holding last night's timetable is
+worse than an empty one, because it is recalled with confidence. Anything containing a
+clock time, a departure, "the next available", "currently", a price or opening hours
+is rejected by pattern, not by asking the model nicely.
+
+**Asking about something is not preferring it.** A fact claiming a preference now
+requires the user to have expressed one: "prefer", "always", "usually", "I like",
+"can't stand". One question about a cafe became a standing preference that would have
+resurfaced in another town.
+
+Tested at all three, plus the case that must still get through: "I always take the
+train rather than drive" is a stated preference and is kept.
+
+## 42. Transit, Times and Places
+
+Symptoms from real use, all of them the same root: the model filling gaps the tools
+should have filled.
+
+**"From Oetwil am See train stop, take the direct train to Gusch."** No such stop, no
+such train. The persona now forbids inventing a stop, station or place name and
+requires `where_am_i` before anything that depends on location, naming that exact
+failure. A remembered location is a starting point for checking, never a substitute.
+
+**Four departures when two were wanted.** "When is the next bus" wants the next bus.
+Two by default, four when a time is named, because naming a time means planning.
+
+**No arrival time.** The tool returned "20:09 to 20:28" and the model relayed only the
+departure. It now says "departs 20:09, arrives 20:28".
+
+**"Zero seven twenty three."** Times are rewritten for the ear before synthesis:
+"seven twenty three AM", "two o'clock PM", "eleven oh five PM". Version numbers are
+left alone.
+
+**"How do I get there" now means public transport**, via a `route_to` tool that finds
+the place, gives its address and straight-line distance, and plans the journey from
+the nearest stop in one step. When the map does not know a small company, it plans to
+the name anyway rather than refusing: the timetable knows towns the map does not.
+
+Every route carries a Google Maps link so the answer can be checked.
+
+## 43. Files Without an Arbitrary Limit
+
+The cap is now the disk, not a number: an upload is refused only if it would come
+within 5 GB of filling the volume the databases live on. Uploading shows the file and
+its size while it transfers, then says it is being read, because a two-minute video
+takes long enough that silence reads as failure.

@@ -60,13 +60,28 @@ def _fetch_headers(config: dict, limit: int, unseen_only: bool) -> list[dict]:
     box = cls(host, port)
     try:
         box.login(config.get("username", ""), config.get("password", ""))
-        box.select(config.get("folder") or "INBOX", readonly=True)
-        status, data = box.search(None, "UNSEEN" if unseen_only else "ALL")
-        if status != "OK":
-            return []
-        ids = data[0].split()[-limit:]
+        criterion = "UNSEEN" if unseen_only else "ALL"
+        folder = config.get("folder") or "INBOX"
+        if folder == "All folders":
+            # No IMAP verb searches every mailbox, so walk them. Newest-first per
+            # folder, then trimmed to the overall limit.
+            boxes = []
+            for raw in (box.list()[1] or []):
+                name = raw.decode(errors="replace").rsplit(' "/" ', 1)[-1].strip('"')
+                if name and "\\Noselect" not in raw.decode(errors="replace"):
+                    boxes.append(name)
+        else:
+            boxes = [folder]
+        ids: list[tuple[str, bytes]] = []
+        for name in boxes[:15]:
+            if box.select(name, readonly=True)[0] != "OK":
+                continue
+            status, data = box.search(None, criterion)
+            if status == "OK" and data and data[0]:
+                ids += [(name, i) for i in data[0].split()[-limit:]]
         messages = []
-        for msg_id in reversed(ids):
+        for name, msg_id in reversed(ids[-limit:]):
+            box.select(name, readonly=True)
             status, raw = box.fetch(
                 msg_id, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
             if status != "OK" or not raw or not raw[0]:
@@ -76,6 +91,7 @@ def _fetch_headers(config: dict, limit: int, unseen_only: bool) -> list[dict]:
                 "from": _decode(parsed.get("From")),
                 "subject": _decode(parsed.get("Subject")) or "(no subject)",
                 "date": _decode(parsed.get("Date")),
+                "folder": name,
             })
         return messages
     finally:
@@ -129,11 +145,17 @@ registry.register(registry.Type(
         registry.Field("username", "Email address", required=True),
         registry.Field("password", "App password", type="password", required=True,
                        secret=True,
-                       help="Create one in your account's security settings."),
+                       help="Outlook.com, Gmail, iCloud and Yahoo all require an app "
+                            "password when two-factor is on: make one in your "
+                            "account's security settings. A Microsoft 365 work "
+                            "account often blocks IMAP entirely, and only your "
+                            "administrator can change that."),
         registry.Field("host", "IMAP server", required=True),
         registry.Field("port", "Port", type="number", default=993),
         registry.Field("ssl", "Use SSL", type="boolean", default=True),
-        registry.Field("folder", "Folder", default="INBOX"),
+        registry.Field("folder", "Folder", type="choice", default="INBOX",
+                       choices=["INBOX", "All folders", "Archive", "Sent", "Junk"],
+                       help="'All folders' searches everything the server exposes."),
         registry.Field("unseen_only", "Unread only", type="boolean", default=True),
         registry.Field("limit", "Messages to fetch", type="number", default=10),
     ],
@@ -257,20 +279,25 @@ registry.register(registry.Type(
         "iCloud": {"url": "https://caldav.icloud.com/"},
         "Fastmail": {"url": "https://caldav.fastmail.com/dav/calendars/user/"
                             "USERNAME/Default/"},
+        "Google": {"url": "https://apidata.googleusercontent.com/caldav/v2/"
+                          "YOUR-EMAIL/events/"},
         "Other": {},
     },
     fields=[
         registry.Field("provider", "Provider", type="choice", required=True,
                        default="Nextcloud",
-                       choices=["Nextcloud", "iCloud", "Fastmail", "Other"],
-                       help="Fills in the URL shape; replace the capitals with yours."),
+                       choices=["Nextcloud", "iCloud", "Fastmail", "Google", "Other"],
+                       help="Fills in the URL shape; replace the capitals with yours. "
+                            "Outlook is not here because Microsoft removed CalDAV; "
+                            "reaching it needs the Graph API, which is not built yet."),
         registry.Field("url", "Calendar URL", required=True,
                        help="Ends in a slash."),
         registry.Field("username", "Username", required=True),
         registry.Field("password", "App password", type="password", required=True,
                        secret=True,
                        help="Create one in your account's security settings."),
-        registry.Field("days", "Days ahead", type="number", default=1),
+        registry.Field("days", "Days ahead", type="number", default=1,
+                       help="How far forward to look. 1 is today, 7 is the week."),
     ],
     actions={"check": _check_calendar},
     action_labels={"check": "what's on"},

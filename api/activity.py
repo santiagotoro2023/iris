@@ -42,6 +42,21 @@ async def record(action: str, detail: str = "", actor: str | None = None) -> Non
         pass
 
 
+@router.delete("")
+async def clear(days: int = 0):
+    """Wipe the audit log. `days` keeps anything more recent than that."""
+    async with await _connect() as conn:
+        async with conn.cursor() as cur:
+            if days > 0:
+                await cur.execute("DELETE FROM activity WHERE at < now() - "
+                                  "make_interval(days => %s)", (days,))
+            else:
+                await cur.execute("DELETE FROM activity")
+            removed = cur.rowcount
+    await record("activity.clear", f"{removed} entries removed")
+    return {"removed": removed}
+
+
 @router.get("")
 async def recent(limit: int = 100):
     limit = max(1, min(limit, 500))

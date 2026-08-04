@@ -89,7 +89,8 @@
         </button>
         <div class="quick-menu" id="quick-menu" role="menu" hidden></div>
         <button class="mic" id="hands-free" type="button" aria-pressed="false"
-                aria-label="Hands-free listening" title="Hands-free listening">
+                aria-label="Hands-free listening"
+                title="Hands-free: keep the microphone open and wait for the wake word">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
                stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
             <path d="M4 13v-1a8 8 0 0 1 16 0v1"/>
@@ -191,12 +192,23 @@
         </div>
       </div>
     </div>
+    <div class="panel" style="margin-bottom:1.1rem">
+      <div class="panel-bar">
+        <input class="input grow" id="settings-search" type="text"
+               placeholder="Search settings…" aria-label="Search settings">
+        <span class="desc" id="settings-count"></span>
+      </div>
+    </div>
     <div id="groups"></div>
   </section>
 
   <section class="view" id="view-activity" role="tabpanel">
     <div class="panel">
       <h2>Activity &amp; audit log</h2>
+      <div class="panel-bar">
+        <button class="btn secondary" id="activity-clear" type="button">Clear the log</button>
+        <span class="desc" id="activity-note">Everything IRiS did, and who asked for it.</span>
+      </div>
       <div id="activity-list"><div class="empty">loading…</div></div>
     </div>
   </section>
@@ -339,8 +351,18 @@ function rowFor(key, spec) {
   }
 
   row.append(status, el("div", "key", key));
+  // Searchable on the name, the key and the explanation, since a person looks for
+  // any of the three.
+  row.dataset.search =
+    `${spec.title || ""} ${key} ${spec.description || ""}`.toLowerCase();
   return row;
 }
+
+let settingsSearchTimer;
+$("#settings-search").addEventListener("input", () => {
+  clearTimeout(settingsSearchTimer);
+  settingsSearchTimer = setTimeout(filterSettings, 120);
+});
 
 $("#pw-cancel").addEventListener("click", () => {
   $("#password-panel").hidden = true;
@@ -370,6 +392,23 @@ $("#pw-save").addEventListener("click", async () => {
   }
   $("#pw-save").disabled = false;
 });
+
+function filterSettings() {
+  const q = $("#settings-search").value.trim().toLowerCase();
+  let shown = 0, total = 0;
+  for (const row of document.querySelectorAll("#groups .row")) {
+    total++;
+    const hit = !q || row.dataset.search.includes(q);
+    row.hidden = !hit;
+    if (hit) shown++;
+  }
+  // Hide a section that has nothing left in it, or the page is mostly headings.
+  for (const section of document.querySelectorAll("#groups section")) {
+    const any = [...section.querySelectorAll(".row")].some(r => !r.hidden);
+    section.hidden = !any;
+  }
+  $("#settings-count").textContent = q ? `${shown} of ${total}` : "";
+}
 
 function renderSettings() {
   const groups = {};
@@ -679,9 +718,10 @@ function attachmentBlock(a) {
 /* Shown under a sent message so it is obvious afterwards what context it carried. */
 function commandBlock(name) {
   const cmd = COMMANDS.find(c => c.name === name);
-  const box = el("div", "msg-command");
-  box.append(el("span", "msg-command-mark", "\u26a1"),
-             el("span", null, cmd ? cmd.label : name));
+  // Same shape as an attachment, because it is the same idea: what this message
+  // carried besides its text.
+  const box = el("div", "attachment cmd-used");
+  box.append(el("span", null, `command: ${cmd ? cmd.label : name}`));
   return box;
 }
 
@@ -1113,13 +1153,15 @@ $("#file-input").addEventListener("change", async e => {
   const pending = el("span", "chip pending");
   const spin = el("span", "thinking");
   spin.append(el("i"), el("i"), el("i"));
-  pending.append(spin, el("span", "chip-name", `reading ${file.name}`));
+  const size = file.size > 2 ** 20 ? ` (${Math.round(file.size / 2 ** 20)} MB)` : "";
+  pending.append(spin, el("span", "chip-name", `uploading ${file.name}${size}…`));
   $("#attach-bar").append(pending);
 
   try {
     const form = new FormData();
     form.append("file", file);
     const r = await api("files/analyze", {method: "POST", body: form});
+    pending.querySelector(".chip-name").textContent = `reading ${file.name}…`;
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || `error ${r.status}`);
     ATTACHMENTS.push(data);
@@ -1164,7 +1206,9 @@ $("#mic").addEventListener("click", async () => {
     stream = await navigator.mediaDevices.getUserMedia({audio: true});
   } catch (e) {
     micState({title: "Microphone unavailable: " + e.message});
-    note("Microphone unavailable: " + e.message, true);
+    note(e.name === "NotFoundError"
+      ? "No microphone on this machine. Voice input needs one; everything else works."
+      : "Microphone unavailable: " + e.message, true);
     return;
   }
 
@@ -1259,6 +1303,7 @@ async function startHandsFree() {
     hfState("off", "Hands-free needs https, or localhost.");
     return;
   }
+  note("Hands-free: opening the microphone…");
   let stream, ctx, node;
   try {
     // Echo cancellation is what stops IRiS's own voice from reaching the wake
@@ -1272,7 +1317,9 @@ async function startHandsFree() {
   } catch (e) {
     stream?.getTracks().forEach(t => t.stop());
     await ctx?.close();
-    hfState("off", "Microphone unavailable: " + e.message);
+    hfState("off", e.name === "NotFoundError"
+      ? "Hands-free needs a microphone, and this machine has none."
+      : "Hands-free could not open the microphone: " + e.message);
     return;
   }
 
@@ -1760,6 +1807,27 @@ async function loadConversations({selectLatest = false} = {}) {
 }
 
 /* ------------------------------------------------------------ activity -- */
+$("#activity-clear").addEventListener("click", async () => {
+  const btn = $("#activity-clear");
+  if (btn.dataset.armed !== "yes") {
+    btn.dataset.armed = "yes";
+    btn.textContent = "Really clear it?";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Clear the log"; }, 4000);
+    return;
+  }
+  btn.dataset.armed = "";
+  btn.textContent = "Clear the log";
+  btn.disabled = true;
+  try {
+    const r = await json("activity", {method: "DELETE"});
+    $("#activity-note").textContent = `Removed ${r.removed} entries.`;
+  } catch (e) {
+    $("#activity-note").textContent = e.message;
+  }
+  btn.disabled = false;
+  loadActivity();
+});
+
 async function loadActivity() {
   const list = $("#activity-list");
   try {

@@ -343,6 +343,47 @@ def test_a_fact_without_real_evidence_is_dropped():
     assert kept == ["The user has moved from Zurich to Winterthur."], kept
 
 
+USER_SAID = "Is there a coffee shop near Gusch? And how do I get to SIDMAR AG?"
+
+
+def test_the_assistant_is_not_its_own_witness():
+    """Grounding against the whole exchange made IRiS its own source, and the store
+    filled with what it had just said: a company's service list, and last night's
+    departure times."""
+    exchange = USER_SAID + "\nassistant: SIDMAR AG specializes in Cloud solutions."
+    assert memory.evidenced(
+        [{"fact": "SIDMAR AG specializes in Cloud solutions.",
+          "quote": "SIDMAR AG specializes in Cloud solutions"}],
+        exchange, USER_SAID) == []
+
+
+def test_anything_that_goes_stale_is_not_remembered():
+    """A memory store holding last night's timetable is worse than an empty one,
+    because it gets recalled with confidence."""
+    for fact in ["The trains to Uster depart at 23:23 and 23:53.",
+                 "The next available departure is in 20 minutes.",
+                 "The cafe is currently open.",
+                 "The timetable shows four direct connections."]:
+        assert memory.is_volatile(fact), fact
+    for fact in ["The user lives in Oetwil am See.",
+                 "The user works at CubeServ.",
+                 "The user's server has 8 GB of VRAM."]:
+        assert not memory.is_volatile(fact), fact
+
+
+def test_asking_about_something_is_not_preferring_it():
+    """One question about a cafe became "the user prefers Cafe Oase", which then
+    came back as a preference in an unrelated town."""
+    assert memory.evidenced(
+        [{"fact": "The user prefers Cafe Oase near Gusch.",
+          "quote": "coffee shop near Gusch"}], USER_SAID, USER_SAID) == []
+    # A stated preference still gets through.
+    said = "I always take the train rather than drive."
+    assert memory.evidenced(
+        [{"fact": "The user prefers the train to driving.",
+          "quote": "I always take the train rather than drive"}], said, said)
+
+
 def test_a_real_quote_cannot_smuggle_in_an_unrelated_fact():
     """Quoting correctly and then asserting something else is the obvious way round
     the check, so the fact is also tested against its own quote."""
@@ -486,6 +527,16 @@ def test_a_zero_coordinate_is_not_a_location():
     with patch.dict(settings._overrides, {"location.latitude": 47.5,
                                           "location.longitude": 8.7}):
         assert places._fixed_coordinates() == (47.5, 8.7)
+
+
+def test_clock_times_are_read_as_times():
+    """"07:23" read out as "zero seven twenty three" is not how anyone says a time."""
+    assert "seven twenty three A M" in voice.speech_text("Departs 07:23.")
+    assert "two o'clock P M" in voice.speech_text("Meeting at 14:00.")
+    assert "eleven oh five P M" in voice.speech_text("It is 23:05.")
+    assert "twelve" in voice.speech_text("At 12:30.")       # not "zero"
+    # A version number is not a time and must be left alone.
+    assert "1.2" in voice.speech_text("Version 1.2 is out.")
 
 
 def test_journey_duration_is_readable_aloud():

@@ -456,3 +456,6 @@ button { font: inherit; color: inherit; }
 .backup-row .when, .backup-row .size { color: var(--dim); white-space: nowrap; }
 .backup-head { color: var(--dim); text-transform: uppercase; letter-spacing: .12em;
                font-size: .62rem; border-bottom: 1px solid var(--line-2); }
+
+/* A used quick command, shown like an attachment because it is the same idea. */
+.cmd-used { color: var(--orange); }

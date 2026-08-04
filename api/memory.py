@@ -180,6 +180,27 @@ async def recall(query: str, user_id: int, limit: int | None = None,
         return []          # memory is an enhancement; never break a reply over it
 
 
+# Things that are true now and wrong in an hour. A memory store full of last night's
+# timetable is worse than an empty one: it gets recalled with confidence.
+_VOLATILE = re.compile(
+    r"\b\d{1,2}[:.]\d{2}\b"                       # a clock time
+    r"|\b(depart|departs|departure|arrives|arrival|timetable|schedule[ds]?)\b"
+    r"|\b(next available|currently|right now|at the moment|today|tomorrow|tonight)\b"
+    r"|\b(open now|opening hours|in stock|available now|price|costs? \d)\b",
+    re.I)
+
+# A claim about preference needs the user to have expressed one.
+_CLAIMS_PREFERENCE = re.compile(r"\b(prefer|prefers|favourite|favorite|likes best)\b",
+                                re.I)
+_STATES_PREFERENCE = re.compile(
+    r"\b(prefer|prefers|favourite|favorite|i like|i love|always|usually|normally|"
+    r"rather|can't stand|cannot stand|hate|never)\b", re.I)
+
+
+def is_volatile(fact: str) -> bool:
+    return bool(_VOLATILE.search(fact))
+
+
 # bge-m3 scores a two-word fragment against almost anything at ~0.44, well inside
 # the range a real match occupies, so "the weather" would drag in every memory
 # stored. Short turns are also the ones least likely to need recalling anything.
@@ -251,11 +272,9 @@ async def ingest(audio: UploadFile = File(...),
     data = await audio.read()
     if not data:
         raise HTTPException(400, "empty audio")
-    limit = 500 * 1024 * 1024
-    if len(data) > limit:
-        raise HTTPException(413, f"that recording is "
-                                 f"{len(data) // 2**20} MB; the limit is "
-                                 f"{limit // 2**20} MB")
+    import files
+    if not files._room_for(len(data)):
+        raise HTTPException(413, f"no room for {len(data) // 2**20} MB on the disk")
     result = await voice.transcribe_bytes(data, audio.filename or "recording.webm",
                                           audio.content_type or "audio/webm")
     text = (result.get("text") or "").strip()
@@ -364,7 +383,7 @@ def _grounded(fact: str, source: str) -> bool:
     return sum(w in have for w in words) / len(words) >= 0.5
 
 
-def evidenced(facts: list[dict], source: str) -> list[str]:
+def evidenced(facts: list[dict], source: str, said_by_user: str = "") -> list[str]:
     """Keep only facts whose quote is genuinely in the conversation.
 
     This is the root fix for an extractor that pads its list. Asking for fewer facts
@@ -373,8 +392,12 @@ def evidenced(facts: list[dict], source: str) -> list[str]:
     the question from "did it obey" to "is this string present", which is decidable
     here rather than by the model. A model can invent a fact; it cannot invent a
     quote that is already in the text.
+
+    The quote must come from the USER. Grounding against the whole exchange made the
+    assistant its own witness, and the store filled with what IRiS had just said: a
+    company's service list, and last night's departure times.
     """
-    flat_source = _flat(source)
+    flat_source = _flat(said_by_user or source)
     kept = []
     for item in facts:
         fact = (item.get("fact") or "").strip()
@@ -382,9 +405,13 @@ def evidenced(facts: list[dict], source: str) -> list[str]:
         if len(fact) < 12 or len(quote) < 8:
             continue
         if _flat(quote).strip() not in flat_source:
-            continue                       # the evidence is not in the conversation
+            continue                       # not in the user's own words
         if not _grounded(fact, quote):
             continue                       # the quote does not support the fact
+        if is_volatile(fact):
+            continue                       # true now, wrong in an hour
+        if _CLAIMS_PREFERENCE.search(fact) and not _STATES_PREFERENCE.search(quote):
+            continue                       # asking about something is not preferring it
         kept.append(fact)
     return kept
 
@@ -397,15 +424,17 @@ async def capture(exchange: list[dict], user_id: int) -> list[str]:
             return []
         text = "\n".join(f"{m['role']}: {m.get('content') or ''}"
                           for m in exchange if m.get("role") in ("user", "assistant"))
-        if len(text) < MIN_CAPTURE_CHARS:
-            return []
+        said_by_user = "\n".join(m.get("content") or "" for m in exchange
+                                 if m.get("role") == "user")
+        if len(said_by_user.strip()) < MIN_CAPTURE_CHARS:
+            return []                       # nothing of theirs to learn from
         reply = await _complete(CAPTURE_SYSTEM, text[:6000], CAPTURE_FORMAT)
         try:
             candidates = json.loads(reply).get("facts") or []
         except (ValueError, AttributeError):
             return []
         stored = []
-        for fact in evidenced(candidates, text)[:MAX_FACTS]:
+        for fact in evidenced(candidates, text, said_by_user)[:MAX_FACTS]:
             await remember(fact, user_id, source="learned")
             stored.append(fact)
         return stored

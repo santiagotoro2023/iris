@@ -271,6 +271,22 @@ async def _departures(station: str = ""):
     return await places.departures(station)
 
 
+@tool("route_to",
+      "How to get to a named place: finds it on the map, gives its address and how "
+      "far it is, and plans public transport there from where the user is. Use this "
+      "for 'how do I get there', 'how do I get to X', and any question about "
+      "reaching somewhere.",
+      {"type": "object",
+       "properties": {"place": {"type": "string",
+                                "description": "The place, shop, company or address "
+                                               "to travel to."}},
+       "required": ["place"]},
+      activity="Working out how to get to {place}", display="lines")
+async def _route_to(place: str):
+    import places
+    return await places.route_to(place)
+
+
 @tool("find_place",
       "Find shops, restaurants, amenities and addresses on the map. Use this for "
       "'where is the nearest X' questions rather than searching the web.",
@@ -567,7 +583,8 @@ async def stream(messages: list[dict], model: str | None = None,
              and not (name in ("remember", "recall") and memory_off)
              and not (name == "look_at_camera"
                       and not settings.get("cameras.enabled"))
-             and not (name in ("transit", "departures", "find_place", "weather")
+             and not (name in ("transit", "departures", "find_place", "weather",
+                               "route_to", "where_am_i")
                       and not settings.get("location.enabled"))]
 
     async with httpx.AsyncClient(timeout=600) as c:
