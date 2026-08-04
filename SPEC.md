@@ -1273,3 +1273,59 @@ three things that cannot be guessed:
    language model, Whisper and the vision model. Frigate doing continuous detection on
    it changes the VRAM budget that every earlier phase was tuned around.
 3. **Retention and storage**, which interacts with §26's backups and the media volume.
+
+
+## 31. Phase 6 — Transit and Places
+
+The two integrations in §5 that need no credentials, so they work on a fresh install:
+`transport.opendata.ch` and OpenStreetMap Nominatim. Three tools: `transit` (a
+journey), `departures` (the board at the platform) and `find_place`.
+
+**"Home" and "work" are settings, not an ASK USER.** §8 listed home and work
+addresses as a question for Santiago. They are two text fields in the UI instead,
+which is where §3.1 says configuration belongs, and `resolve()` maps the words a
+person actually uses — "home", "work", "the office", and the German forms — onto
+them. Unset, they fall through to the literal word rather than to an empty query,
+which the transit API cheerfully answers with every station in the country.
+
+**Durations are rewritten for the ear.** The API returns `00d00:19:00`. Since these
+answers get read aloud (§17), that becomes "19 min" and "1h 05".
+
+**Nominatim's terms are implemented, not hoped for**: an identifying User-Agent and
+at most one request a second, serialised behind a lock so concurrent tool calls
+cannot breach it.
+
+Verified live against both services: a departure board for Winterthur, four
+connections to Zurich HB with platforms and change counts, two pharmacies from the
+map, and an unknown stop answered with "Check the stop name" rather than an empty
+list.
+
+### Remaining Phase 6 integrations
+
+Email (Microsoft Graph, Gmail), calendar, and WhatsApp via Baileys all need
+credentials and, for WhatsApp, a secondary number. Those stay blocked on Santiago.
+
+## 32. Wake Word Training: What Upstream Got Stale
+
+Four failures between a working image and a running trainer, all of them upstream
+drift rather than anything specific to IRiS. Recorded because the next person to
+touch this will hit exactly the same wall.
+
+1. **`datasets==2.14.6` calls `pa.PyExtensionType`**, removed in pyarrow 15. Pinned
+   pyarrow to 14.0.2 in its own layer so the large install above it stays cached.
+2. **The AudioSet tar in the notebook is gone.** That repository is parquet now, and
+   the pinned `datasets` cannot stream the new layout either. Replaced with ESC-50, a
+   direct ungated zip of the same kind of audio, extracted with stdlib `zipfile`
+   because adding `unzip` would invalidate the torch layer.
+3. **`from generate_samples import generate_samples` fails against rhasspy's repo**,
+   which has moved that module into a package. openWakeWord's own config comment
+   points at dscripka's fork, which keeps the flat layout; the notebook's clone
+   command no longer satisfies the notebook's own trainer.
+4. **The fork wants `en-us-libritts-high.pt`** from rhasspy's v1.0.0 release, matching
+   the `.json` config it ships. The v2.0.0 "medium" weights the newer notebook
+   downloads describe a different architecture. And torch 2.6 flipped `torch.load` to
+   `weights_only=True`, which cannot load a pickled model object, so the generator is
+   patched at build time.
+
+Every corpus fetch is now individually non-fatal: one unavailable dataset was
+throwing away a 17.3 GB download that had already succeeded.

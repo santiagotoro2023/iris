@@ -182,6 +182,22 @@ ranks the distilled fact above the raw chunk it came from.
 > HuggingFace licence that has to be accepted with an account, so it needs a decision
 > rather than more work.
 
+## Transit and places
+
+Two integrations that need no account, so they work the moment IRiS is installed:
+Swiss public transport via **transport.opendata.ch** and place lookup via
+OpenStreetMap's **Nominatim**. IRiS gets three tools — a journey, a departure board,
+and a place search — so "when's the next train to Zurich?" and "where's the nearest
+pharmacy?" are answered from the live timetable and the map rather than from a web
+search.
+
+Set **Home** and **Work** in Settings and the words work as words: "the next train
+home" resolves without naming the stop. Left empty, IRiS asks rather than guessing.
+
+> Transit is Switzerland only, which is what [SPEC.md §5](./SPEC.md) specifies.
+> Nominatim's usage policy caps requests at one a second and requires an identifying
+> User-Agent; both are enforced here rather than hoped for.
+
 ## Backups
 
 Everything IRiS knows lives in three places, so a backup is all three or it is

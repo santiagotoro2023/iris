@@ -40,9 +40,19 @@ RUN pip3 install --no-cache-dir --no-deps openwakeword==0.6.0 \
 # `from generate_samples import generate_samples`, and upstream rhasspy has since
 # moved that module into a package, so the notebook's own clone command no longer
 # satisfies its own trainer. The fork keeps the flat layout train.py expects.
+#
+# The checkpoint is the v1.0.0 "high" model, which is what the fork's bundled
+# en-us-libritts-high.pt.json describes; the v2.0.0 "medium" weights the newer
+# notebook downloads do not match that config.
+#
+# The sed is for torch 2.6, which flipped torch.load to weights_only=True. The
+# checkpoint is a pickled model object, not a state dict, so it cannot load under
+# the new default and the generator has not been updated for it.
 RUN git clone --depth 1 https://github.com/dscripka/piper-sample-generator /opt/piper-sample-generator \
- && wget -q -O /opt/piper-sample-generator/models/en_US-libritts_r-medium.pt \
-      https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt
+ && wget -q -O /opt/piper-sample-generator/models/en-us-libritts-high.pt \
+      https://github.com/rhasspy/piper-sample-generator/releases/download/v1.0.0/en-us-libritts-high.pt \
+ && sed -i 's/torch.load(model_path)/torch.load(model_path, weights_only=False)/' \
+      /opt/piper-sample-generator/generate_samples.py
 
 # The fork phonemises through espeak-ng rather than piper-phonemize. Appended as its
 # own layer, after the clone, so none of the cached layers above are invalidated.
