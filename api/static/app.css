@@ -459,3 +459,20 @@ button { font: inherit; color: inherit; }
 
 /* A used quick command, shown like an attachment because it is the same idea. */
 .cmd-used { color: var(--orange); }
+
+.md-link { color: var(--orange); text-decoration: none;
+           border-bottom: 1px solid rgba(255,122,26,.4); overflow-wrap: anywhere; }
+.md-link:hover { border-bottom-color: var(--orange); }
+
+/* A short, dismissible notice, for things worth interrupting for. */
+.modal-back { position: fixed; inset: 0; z-index: 100; display: grid;
+              place-items: center; background: rgba(6,7,9,.72); }
+.modal { max-width: 24rem; border: 1px solid var(--line-2); background: var(--panel);
+         box-shadow: 0 24px 60px -20px #000; }
+.modal h3 { margin: 0; padding: .8rem .9rem; font-family: var(--mono);
+            font-size: .68rem; letter-spacing: .16em; text-transform: uppercase;
+            color: var(--orange); border-bottom: 1px solid var(--line); }
+.modal p { margin: 0; padding: .9rem; line-height: 1.55; font-size: .88rem; }
+.modal .thing-actions { padding: 0 .9rem .9rem; }
+
+.choice-free { display: grid; gap: .35rem; }

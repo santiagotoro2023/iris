@@ -145,17 +145,14 @@ registry.register(registry.Type(
         registry.Field("username", "Email address", required=True),
         registry.Field("password", "App password", type="password", required=True,
                        secret=True,
-                       help="Outlook.com, Gmail, iCloud and Yahoo all require an app "
-                            "password when two-factor is on: make one in your "
-                            "account's security settings. A Microsoft 365 work "
-                            "account often blocks IMAP entirely, and only your "
-                            "administrator can change that."),
+                       help="Make one in your account's security settings. A work "
+                            "Microsoft 365 account may block IMAP entirely."),
         registry.Field("host", "IMAP server", required=True),
         registry.Field("port", "Port", type="number", default=993),
         registry.Field("ssl", "Use SSL", type="boolean", default=True),
-        registry.Field("folder", "Folder", type="choice", default="INBOX",
+        registry.Field("folder", "Folder", type="choice", default="INBOX", free=True,
                        choices=["INBOX", "All folders", "Archive", "Sent", "Junk"],
-                       help="'All folders' searches everything the server exposes."),
+                       help="Or type your own, e.g. INBOX/Projects."),
         registry.Field("unseen_only", "Unread only", type="boolean", default=True),
         registry.Field("limit", "Messages to fetch", type="number", default=10),
     ],
@@ -304,6 +301,56 @@ registry.register(registry.Type(
 ))
 
 
+async def _check_ics(thing: dict, user: dict | None = None) -> dict:
+    """A published calendar link. Outlook, Google and most others can produce one,
+    and it is the only way to reach an Outlook calendar without the Graph API."""
+    days = int(thing["config"].get("days") or 1)
+    url = thing["config"]["url"].replace("webcal://", "https://")
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
+        r = await c.get(url)
+    if r.status_code >= 300:
+        raise HTTPException(502, f"the calendar link returned HTTP {r.status_code}")
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(days=days)
+    events = []
+    for event in _parse_events(r.text):
+        when = _as_datetime(event.get("start", ""))
+        if when and now - timedelta(hours=12) <= when <= horizon:
+            events.append(event)
+    events.sort(key=lambda e: e.get("start", ""))
+    return {"calendar": thing["name"], "count": len(events),
+            "messages": [{"from": _when(e), "subject": e["summary"]}
+                         for e in events]}
+
+
+def _as_datetime(raw: str):
+    for fmt in ("%Y%m%dT%H%M%SZ", "%Y%m%dT%H%M%S", "%Y%m%d"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+registry.register(registry.Type(
+    kind="integration", name="calendar_ics", label="Calendar (published link)",
+    description="Any calendar you can publish as a link, including Outlook, which "
+                "does not support the usual protocol.",
+    fields=[
+        registry.Field("url", "Calendar link", type="password", required=True,
+                       secret=True,
+                       help="Outlook: Settings, Calendar, Shared calendars, publish, "
+                            "then copy the ICS link. Google: Settings, your calendar, "
+                            "secret address in iCal format."),
+        registry.Field("days", "Days ahead", type="number", default=1,
+                       help="1 is today, 7 is the week."),
+    ],
+    actions={"check": _check_ics},
+    action_labels={"check": "what's on"},
+))
+
+
 # ------------------------------------------------------------------ push ----
 
 async def _send_push(thing: dict, user: dict | None = None,
@@ -360,14 +407,16 @@ async def check_all_mail() -> str:
 
 
 async def check_all_calendars() -> str:
-    cals = await registry.enabled_of_type("integration", "calendar")
+    cals = (await registry.enabled_of_type("integration", "calendar")
+            + await registry.enabled_of_type("integration", "calendar_ics"))
     if not cals:
         return ("No calendar is set up. Add one under Integrations with its CalDAV "
                 "URL and an app password.")
     lines = []
     for cal in cals:
         try:
-            result = await _check_calendar(cal)
+            result = await (_check_ics(cal) if cal["type"] == "calendar_ics"
+                            else _check_calendar(cal))
         except HTTPException as e:
             lines.append(f"{cal['name']}: unreachable ({e.detail})")
             continue

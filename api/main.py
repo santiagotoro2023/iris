@@ -77,6 +77,12 @@ settings.setting(
     title="Web search", order=3,
     description="How readily IRiS looks things up instead of answering from memory.")
 settings.setting(
+    "llm.tool_budget", type="integer", minimum=2, maximum=20, default=5,
+    title="Tools offered per message", order=80,
+    description="How many optional tools IRiS is shown at once, on top of the ones it "
+                "always has. Too many and a small model picks badly; too few and it "
+                "cannot reach something unusual.")
+settings.setting(
     "general.timezone", type="string",
     enum=lambda: sorted(zoneinfo.available_timezones()),
     default=os.environ.get("IRIS_TZ", "Europe/Zurich"),

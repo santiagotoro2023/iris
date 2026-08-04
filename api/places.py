@@ -38,6 +38,11 @@ settings.setting(
     title="Home", order=1,
     description="Your home stop or address, so 'the next train home' works.")
 settings.setting(
+    "location.stop", type="string", default="", order=3,
+    title="Preferred stop",
+    description="The stop you actually use. Left empty, IRiS takes the closest one, "
+                "which is not always the one you walk to.")
+settings.setting(
     "location.work", type="string", default="",
     title="Work", order=2,
     description="The other end of the commute.")
@@ -54,6 +59,15 @@ settings.setting(
     "location.longitude", type="number", minimum=-180, maximum=180, default=0.0,
     title="Longitude", order=86)
 settings.setting(
+    "location.accuracy", type="number", minimum=0, maximum=100000, default=0.0,
+    title="Location accuracy (metres)", order=87,
+    description="How good the last fix was. A machine without GPS positions itself "
+                "by wifi and can be a kilometre out.")
+settings.setting(
+    "location.fixed_at", type="number", minimum=0, maximum=1e12, default=0.0,
+    title="Location taken at", order=88,
+    description="When the last fix arrived, as a timestamp.")
+settings.setting(
     "location.region", type="string", default="Switzerland",
     title="Where to search", order=87,
     description="Used only when nothing more precise is known.")
@@ -68,6 +82,14 @@ _HERE = {"here", "current location", "my location", "where i am", "nearby",
 
 
 async def nearest_stop() -> str:
+    """The stop he actually uses, if he named one; otherwise the closest."""
+    preferred = settings.get("location.stop")
+    if preferred:
+        return preferred
+    return await closest_stop()
+
+
+async def closest_stop() -> str:
     """The closest stop to wherever the browser last said we were.
 
     "when is the next bus to Uster" has an origin, it just is not spoken, and
@@ -354,8 +376,9 @@ async def route_to(place: str) -> str:
         # Planning to the place as named beats refusing outright.
         origin = await nearest_stop() or settings.get("location.home")
         if origin:
-            return (f"The map does not list {place!r}, so this is the journey to it "
-                    f"as named.\n" + await journey(origin, place))
+            # No hedging: the timetable resolved the name, and a sentence of doubt
+            # made the model discard real connections and invent its own route.
+            return await journey(origin, place)
         return f"I could not find {place!r} on the map."
     label = hit["display_name"].split(",")[0]
     town = (hit.get("address", {}).get("town")
@@ -453,9 +476,15 @@ async def whereabouts() -> str:
     lat, lon = coords
     name = await _place_name(lat, lon)
     stop = await nearest_stop()
-    lines = [f"Location: {name or 'unknown'} ({lat}, {lon})."]
+    accuracy = settings.get("location.accuracy")
+    lines = [f"Location: {name or 'unknown'} ({lat}, {lon})"
+             + (f", accurate to about {int(accuracy)} m." if accuracy else ".")]
+    if accuracy > 500:
+        lines.append("That fix is coarse, so treat the nearest stop as approximate.")
     if stop:
-        lines.append(f"Nearest public transport stop: {stop}.")
+        preferred = settings.get("location.stop")
+        lines.append(f"Departure stop: {stop}."
+                     + ("" if preferred else " (the closest to that fix)"))
     home, work = settings.get("location.home"), settings.get("location.work")
     if home:
         lines.append(f"Home is {home}." + (f" Work is {work}." if work else ""))

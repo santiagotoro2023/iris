@@ -43,6 +43,8 @@ class Field:
     default: Any = ""
     help: str = ""
     choices: list[str] = field(default_factory=list)
+    # Offer the list, but let them type something the list does not have.
+    free: bool = False
 
     def as_json(self) -> dict:
         out = {"name": self.name, "label": self.label, "type": self.type,
@@ -50,6 +52,7 @@ class Field:
                "default": self.default, "help": self.help}
         if self.choices:
             out["choices"] = self.choices
+            out["free"] = self.free
         return out
 
 
@@ -184,7 +187,7 @@ def validate(spec: Type, config: dict) -> dict:
             # A port of 993.0 is not a port. Keep whole numbers whole.
             if value.is_integer():
                 value = int(value)
-        elif f.choices and value not in f.choices and value != "":
+        elif f.choices and not f.free and value not in f.choices and value != "":
             raise HTTPException(400, f"{f.label} must be one of: "
                                      f"{', '.join(f.choices)}")
         clean[f.name] = value

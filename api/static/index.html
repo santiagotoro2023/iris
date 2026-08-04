@@ -310,12 +310,16 @@ function rowFor(key, spec) {
       note.textContent = "asking the browser (allow GPS for a precise fix)…";
       navigator.geolocation.getCurrentPosition(async pos => {
         try {
-          const r = await send("places/location", {
-            latitude: pos.coords.latitude, longitude: pos.coords.longitude}, "POST");
           const acc = Math.round(pos.coords.accuracy || 0);
-          note.textContent = `Set to ${r.place}, accurate to about ${acc} m.`
-            + (acc > 500 ? " That is coarse: the browser used the network rather than"
-                         + " GPS. Try again outdoors or on a phone." : "");
+          const r = await send("places/location", {
+            latitude: pos.coords.latitude, longitude: pos.coords.longitude,
+            accuracy: acc}, "POST");
+          note.textContent = r.kept
+            ? `Kept the earlier, better fix. ${r.detail}.`
+            : `Set to ${r.place}, accurate to about ${acc} m.`
+              + (acc > 500 ? " That is coarse: this machine has no GPS and positioned"
+                           + " itself by network. Set a preferred stop below, or use"
+                           + " a phone." : "");
         } catch (e) {
           note.textContent = "Could not save: " + e.message;
         }
@@ -533,16 +537,29 @@ function addSpeakButton(head, getText) {
 
 /* Minimal inline markdown. The model still emits **bold** and `code`; showing the
    asterisks literally looks unfinished. Built as DOM nodes, never innerHTML. */
-const INLINE = /(\*\*|__)(\S(?:[^\n]*?\S)?)\1|(?<![*\w])\*(\S(?:[^\n]*?\S)?)\*(?![*\w])|`([^`\n]+)`/g;
+const INLINE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(?<![\w(])(https?:\/\/[^\s<>)\]]+)|(\*\*|__)(\S(?:[^\n]*?\S)?)\4|(?<![*\w])\*(\S(?:[^\n]*?\S)?)\*(?![*\w])|`([^`\n]+)`/g;
+
+function link(href, text) {
+  const a = document.createElement("a");
+  a.className = "md-link";
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  // A bare URL is unreadable at full length; the destination is still the href.
+  a.textContent = text.length > 60 ? text.slice(0, 57) + "…" : text;
+  return a;
+}
 
 function renderInline(text, into) {
   let last = 0, m;
   INLINE.lastIndex = 0;
   while ((m = INLINE.exec(text)) !== null) {
     if (m.index > last) into.append(text.slice(last, m.index));
-    if (m[2] !== undefined) into.append(el("strong", null, m[2]));
-    else if (m[3] !== undefined) into.append(el("em", null, m[3]));
-    else into.append(el("code", null, m[4]));
+    if (m[2] !== undefined) into.append(link(m[2], m[1]));          // [text](url)
+    else if (m[3] !== undefined) into.append(link(m[3], m[3]));     // a bare url
+    else if (m[5] !== undefined) into.append(el("strong", null, m[5]));
+    else if (m[6] !== undefined) into.append(el("em", null, m[6]));
+    else into.append(el("code", null, m[7]));
     last = m.index + m[0].length;
   }
   if (last < text.length) into.append(text.slice(last));
@@ -1002,8 +1019,10 @@ function refreshLocation({force = false} = {}) {
     navigator.geolocation.getCurrentPosition(async pos => {
       lastFix = Date.now();
       try {
+        // Accuracy travels with it: the server keeps the better fix, not the newer.
         await send("places/location", {latitude: pos.coords.latitude,
-                                       longitude: pos.coords.longitude}, "POST");
+                                       longitude: pos.coords.longitude,
+                                       accuracy: pos.coords.accuracy || 0}, "POST");
       } catch { /* a stale fix beats no reply */ }
       resolve();
     }, () => resolve(),
@@ -1175,6 +1194,26 @@ $("#file-input").addEventListener("change", async e => {
 /* --------------------------------------------------------------- voice -- */
 let recorder = null, chunks = [];
 
+function modal(title, message) {
+  const back = el("div", "modal-back");
+  const box = el("div", "modal");
+  box.append(el("h3", null, title), el("p", null, message));
+  const bar = el("div", "thing-actions");
+  const ok = el("button", "btn", "Right");
+  ok.type = "button";
+  const close = () => back.remove();
+  ok.addEventListener("click", close);
+  back.addEventListener("click", e => { if (e.target === back) close(); });
+  document.addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
+  });
+  bar.append(ok);
+  box.append(bar);
+  back.append(box);
+  document.body.append(back);
+  ok.focus();
+}
+
 function note(text, isError = false) {
   const el_ = $("#composer-note");
   el_.hidden = !text;
@@ -1206,9 +1245,8 @@ $("#mic").addEventListener("click", async () => {
     stream = await navigator.mediaDevices.getUserMedia({audio: true});
   } catch (e) {
     micState({title: "Microphone unavailable: " + e.message});
-    note(e.name === "NotFoundError"
-      ? "No microphone on this machine. Voice input needs one; everything else works."
-      : "Microphone unavailable: " + e.message, true);
+    if (e.name === "NotFoundError") modal("No microphone", "No microphone on this machine.");
+    else note("Microphone unavailable: " + e.message, true);
     return;
   }
 
@@ -1317,9 +1355,12 @@ async function startHandsFree() {
   } catch (e) {
     stream?.getTracks().forEach(t => t.stop());
     await ctx?.close();
-    hfState("off", e.name === "NotFoundError"
-      ? "Hands-free needs a microphone, and this machine has none."
-      : "Hands-free could not open the microphone: " + e.message);
+    // Put the switch back: leaving it on would retry, and fail, on every load.
+    try { VALUES = await send("settings/values", {"voice.hands_free": false}, "PUT"); }
+    catch { /* the microphone is the problem, not the setting */ }
+    hfState("off", "");
+    if (e.name === "NotFoundError") modal("No microphone", "No microphone on this machine.");
+    else modal("Hands-free unavailable", e.message);
     return;
   }
 
@@ -1401,9 +1442,26 @@ const TYPES = {};      // kind -> [type spec]
 function fieldControl(spec, value, onPick) {
   if (spec.type === "boolean")
     return Toggle({checked: value ?? spec.default ?? false, onChange: () => {}});
-  if (spec.choices?.length)
-    return Combo({options: spec.choices, value: value ?? spec.default,
-                  onChange: onPick || (() => {})});
+  if (spec.choices?.length) {
+    const known = value === undefined || spec.choices.includes(value);
+    const combo = Combo({options: spec.choices,
+                         value: known ? (value ?? spec.default) : spec.default,
+                         onChange: onPick || (() => {})});
+    if (!spec.free) return combo;
+    // The list covers the common cases; the box covers the rest.
+    const wrap = el("div", "choice-free");
+    const own = el("input", "input");
+    own.type = "text";
+    own.placeholder = "or type your own";
+    own.value = known ? "" : value;
+    wrap.append(combo, own);
+    wrap.getValue = () => own.value.trim() || combo.value;
+    wrap.setValue = v => {
+      if (spec.choices.includes(v)) { combo.setValue?.(v); own.value = ""; }
+      else own.value = v ?? "";
+    };
+    return wrap;
+  }
   const input = el("input", "input");
   input.type = spec.type === "password" ? "password" : "text";
   if (spec.type === "number") input.inputMode = "numeric";

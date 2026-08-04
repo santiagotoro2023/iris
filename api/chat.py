@@ -168,9 +168,18 @@ async def stream_message(body: Send, user: dict = Depends(auth.active_user)):
                 f"{len(body.content)} chars, streamed"
                 + (f", tools: {', '.join(used)}" if used else ""),
                 user["username"])
-            # Detached: learning from the exchange is a second model call, and the
-            # user is already reading the reply. It must never delay or break it.
-            asyncio.create_task(memory.capture(final["messages"][-2:], uid))
+            # Awaited, not detached: remembering something is an action, and every
+            # action IRiS takes announces itself (SPEC.md 35). The reply is already
+            # fully streamed by now, so only the trailing banner waits on this.
+            learned = await memory.capture(final["messages"][-2:], uid)
+            if learned:
+                note = {"role": "tool", "tool_name": "remember",
+                        "label": "Remembering that",
+                        "display": "lines",
+                        "content": "\n".join(f"- {f}" for f in learned)}
+                await _save(uid, cid, final["messages"] + [note], title)
+                yield json.dumps({"type": "tool", **{k: v for k, v in note.items()
+                                                     if k != "role"}}) + "\n"
 
     return StreamingResponse(events(), media_type="application/x-ndjson",
                              headers={"cache-control": "no-cache",

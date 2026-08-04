@@ -65,6 +65,84 @@ class _Blanks(dict):
         return ""
 
 
+# Always sent. Cheap, and wanted at unpredictable moments: the clock, a search, the
+# memory pair, and where the user is, which SPEC.md 42 requires before anything
+# location-dependent.
+CORE_TOOLS = {"current_time", "web_search", "remember", "recall", "where_am_i"}
+
+# Words that settle it without asking an embedding. Cheaper, and more predictable
+# than similarity for the cases that matter most.
+TRIGGERS: dict[str, tuple[str, ...]] = {
+    "transit": ("bus", "train", "tram", "connection", "depart", "timetable",
+                "journey", "travel", "get to", "get there", "how do i get"),
+    "departures": ("bus", "train", "tram", "departure", "leaving", "next one",
+                   "board", "platform"),
+    "route_to": ("get to", "get there", "how do i get", "route", "directions",
+                 "travel to", "way to"),
+    "find_place": ("nearest", "nearby", "near me", "shop", "restaurant", "cafe",
+                   "coffee", "pharmacy", "supermarket", "where is"),
+    "weather": ("weather", "rain", "sunny", "forecast", "umbrella", "temperature",
+                "cold", "warm", "snow"),
+    "look_at_camera": ("camera", "door", "front door", "garden", "parcel",
+                       "delivery", "who is", "outside"),
+    "check_mail": ("mail", "email", "inbox", "message", "wrote", "replied"),
+    "calendar": ("calendar", "appointment", "meeting", "schedule", "free",
+                 "busy", "diary", "on today", "on tomorrow"),
+    "analyze_file": ("file", "image", "picture", "photo", "document", "pdf",
+                     "video", "attached", "upload", "screenshot"),
+    "system_status": ("how are you", "what are you doing", "busy", "gpu", "vram",
+                      "memory", "disk", "temperature", "load", "running",
+                      "how do you feel", "yourself"),
+}
+
+_tool_vectors: dict[str, list[float]] | None = None
+
+
+async def _relevant(query: str, budget: int) -> set[str]:
+    """Rank the optional tools against the turn, so the model is handed a short list
+    it can actually reason about.
+
+    Eighteen tools and 16,000 characters of schema made an 8B model fill arguments
+    from stale context and lose track of roles (SPEC.md 44). Cutting descriptions
+    cost precision; choosing which tools to send costs none.
+    """
+    global _tool_vectors
+    optional = [n for n in TOOLS if n not in CORE_TOOLS]
+    chosen = {n for n, words in TRIGGERS.items()
+              if n in TOOLS and any(w in query for w in words)}
+    # A word match is evidence; similarity is a guess. When the words settle it,
+    # padding the list out to a budget only puts a camera in front of a question
+    # about the weather.
+    if chosen:
+        return chosen
+    try:
+        import memory
+        if _tool_vectors is None:
+            texts = [TOOLS[n].schema["function"]["description"] for n in optional]
+            vectors = await memory.embed(texts)
+            _tool_vectors = dict(zip(optional, vectors))
+        wanted = (await memory.embed([query]))[0]
+
+        def score(name: str) -> float:
+            v = _tool_vectors.get(name)
+            if not v:
+                return 0.0
+            dot = sum(a * b for a, b in zip(wanted, v))
+            na = sum(a * a for a in wanted) ** 0.5
+            nb = sum(b * b for b in v) ** 0.5
+            return dot / (na * nb) if na and nb else 0.0
+
+        for name in sorted(optional, key=score, reverse=True):
+            if len(chosen) >= budget:
+                break
+            chosen.add(name)
+    except Exception as e:
+        # Never fewer tools because the embedder is down: fall back to all of them.
+        print(f"[reasoning] tool selection unavailable: {e}", flush=True)
+        return set(optional)
+    return chosen
+
+
 def announce(name: str, arguments: dict | None) -> str:
     spec = TOOLS.get(name)
     if not spec:
@@ -532,8 +610,19 @@ async def stream(messages: list[dict], model: str | None = None,
                               "content": system["content"] + "\n\n" + recalled}
 
     memory_off = user_id is None or not settings.get("memory.enabled")
+
+    # Which tools this turn gets. A tool already used in this conversation stays
+    # available, or a follow-up ("and how do I get there?") loses the tool that
+    # answered the question before it.
+    asked = next((m.get("content") or "" for m in reversed(messages)
+                  if m.get("role") == "user"), "").lower()
+    already = {m.get("tool_name") for m in messages if m.get("role") == "tool"}
+    picked = (CORE_TOOLS | already
+              | await _relevant(asked, settings.get("llm.tool_budget")))
+
     tools = [spec.schema for name, spec in TOOLS.items()
-             if not (name == "web_search" and policy == "off")
+             if name in picked
+             and not (name == "web_search" and policy == "off")
              and not (name in ("remember", "recall") and memory_off)
              and not (name == "look_at_camera"
                       and not settings.get("cameras.enabled"))
