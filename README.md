@@ -149,11 +149,13 @@ paths use them:
 - **A `remember` tool**, so IRiS can deliberately store something it just learned,
   and a `recall` tool for digging out an older detail.
 - **Learning from conversations.** After each exchange a second, tool-free pass picks
-  out anything durable and stores it. Extracted lines must be *grounded*: a fact
-  whose distinctive words never appear in what was actually said is thrown away,
-  because an 8B model pads its list no matter how the prompt is worded. Asked about a
-  move to Winterthur it also volunteered "they are adjusting to a new daily routine",
-  which nobody said.
+  out anything durable and stores it. Every fact must arrive with a **quote copied
+  word for word** from the conversation, which is then verified as a real substring
+  before the fact is kept. An 8B model pads its list no matter how the prompt is
+  worded, and asked about a move to Winterthur it volunteered "they are adjusting to
+  a new daily routine", which nobody said. Requiring evidence turns "did it obey" into
+  "is this string present": a model can invent a fact, but not a quote that is
+  already in the text.
 
 A near-identical fact replaces the existing one rather than piling up copies. The
 **Memory** tab lists everything remembered, searches it, and lets you add or forget

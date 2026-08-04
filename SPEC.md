@@ -1151,18 +1151,38 @@ empty, so every completed exchange now gets a second, tool-free and persona-free
 extraction pass. It is fired detached from the reply: the user is already reading,
 and a failure there must never surface as a broken conversation.
 
-**Grounding is the interesting part.** The extractor pads its list regardless of the
-prompt. Asked about a move from Zurich to Winterthur it returned three lines, the
-third being "They are adjusting to a new daily routine" — which nobody said.
+**The padding problem, and the actual fix.** The extractor pads its list regardless
+of the prompt. Asked about a move from Zurich to Winterthur it returned three lines,
+the third being "They are adjusting to a new daily routine" — which nobody said.
 Tightening the prompt with "do not infer, generalise or embellish" did not remove it;
-it reproduced verbatim on the next run. What does remove it is a deterministic check:
-take the distinctive words of the candidate fact, drop filler, and require at least
-half of them to actually appear in the exchange. It cannot be talked out of, it costs
-nothing, and it has a test.
+it reproduced verbatim on the next run. Two things were wrong at the root:
 
-Measured after the change: the move produces the two real facts and not the invented
-one, "always give me answers in metric" produces the preference, and a pure lookup
-("What is the capital of Australia?") produces nothing at all.
+1. **A quota is an instruction to fill it.** "At most 3 lines" reads as "give me 3".
+   The prompt now says the opposite and means it: *"Most exchanges contain nothing
+   durable. An empty list is the normal, correct answer and is always better than a
+   padded one."*
+2. **Free-form prose left nothing to check.** Every fact must now arrive with a
+   `quote`: a span copied word for word from the conversation. Ollama's structured
+   output (`format` with a JSON Schema) makes the shape non-negotiable, and the quote
+   is then verified as a substring of the source, compared on words alone so
+   punctuation and case cannot break a real span.
+
+That moves the question from *"did the model obey"* — undecidable, and it does not —
+to *"is this string present"*, which is decided here. **A model can invent a fact; it
+cannot invent a quote that is already in the text.** The earlier word-overlap check
+survives as a second net, now applied against the fact's own quote rather than the
+whole exchange, which is far tighter: quoting correctly and then asserting something
+unrelated is the obvious way round the first check, and it is tested.
+
+Measured after the change, one precise fact per real exchange and nothing else:
+
+| exchange | stored |
+|---|---|
+| "moved from Zurich to Winterthur" | *The user has moved from Zurich to Winterthur.* |
+| "always give me answers in metric" | *The user prefers metric units over Fahrenheit.* |
+| "stzrhws01 has an RTX 3060 Ti with only 8GB" | *The user's server stzrhws01 has 8GB of VRAM.* |
+| "What is the capital of Australia?" | nothing |
+| "haha ok thanks that helps a lot" | nothing |
 
 ### Still open in Phase 3
 

@@ -318,18 +318,47 @@ async def _none():
     return ""
 
 
-def test_invented_facts_are_rejected():
-    """An 8B extractor pads its list no matter how the prompt is worded. Asked about
-    a move to Winterthur it also produced "they are adjusting to a new daily
-    routine", which nobody said. Prompting did not fix it; grounding does."""
-    said = ("user: I've just moved from Zurich to Winterthur, so my commute is "
-            "different now.\nassistant: Winterthur to the office is a different line.")
-    assert memory._grounded("The user has moved from Zurich to Winterthur.", said)
-    assert memory._grounded("Their commute to the office is now different.", said)
-    assert not memory._grounded("They are adjusting to a new daily routine.", said)
-    assert not memory._grounded("The user enjoys skiing in the Alps.", said)
-    # Filler alone must never vouch for a sentence.
-    assert not memory._grounded("They have been there.", said)
+SAID = ("user: I've just moved from Zurich to Winterthur, so my commute is different "
+        "now.\nassistant: Winterthur to the office is a different line entirely.")
+
+
+def test_a_fact_without_real_evidence_is_dropped():
+    """The extractor pads its list no matter how the prompt is worded: told "at most
+    3" it returns 3, and told not to embellish it embellishes anyway, verbatim, on
+    the next run. Requiring a copied span turns "did it obey" into "is this string
+    present", which is decidable here instead of by the model."""
+    kept = memory.evidenced([
+        {"fact": "The user has moved from Zurich to Winterthur.",
+         "quote": "I've just moved from Zurich to Winterthur"},
+        # The invented one. Fluent, plausible, and said by nobody.
+        {"fact": "The user is adjusting to a new daily routine.",
+         "quote": "I am adjusting to a new daily routine"},
+    ], SAID)
+    assert kept == ["The user has moved from Zurich to Winterthur."], kept
+
+
+def test_a_real_quote_cannot_smuggle_in_an_unrelated_fact():
+    """Quoting correctly and then asserting something else is the obvious way round
+    the check, so the fact is also tested against its own quote."""
+    kept = memory.evidenced([
+        {"fact": "The user owns a holiday home in Winterthur.",
+         "quote": "I've just moved from Zurich to Winterthur"},
+    ], SAID)
+    assert kept == [], kept
+
+
+def test_evidence_survives_punctuation_and_case():
+    """A quote is compared on words alone; real spans must not be lost to a stray
+    comma or a capital letter."""
+    assert memory.evidenced([
+        {"fact": "The user has moved to Winterthur.",
+         "quote": "Moved from Zurich, to Winterthur!"},
+    ], SAID)
+
+
+def test_grounding_ignores_filler_words():
+    assert not memory._grounded("They have been there.", SAID)
+    assert not memory._grounded("The user enjoys skiing in the Alps.", SAID)
 
 
 def test_backup_delete_cannot_escape_the_backup_directory():

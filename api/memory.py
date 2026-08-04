@@ -10,6 +10,7 @@ them, and the second is what actually makes memory work:
 
 Qdrant speaks plain HTTP and httpx is already here, so there is no client library.
 """
+import json
 import os
 import re
 import time
@@ -248,41 +249,67 @@ async def delete(point_id: str, user: dict = Depends(auth.active_user)):
 # --------------------------------------------------------------- capture ----
 
 CAPTURE_SYSTEM = """You extract durable facts for a personal assistant's long-term \
-memory. You are not talking to anyone; you only produce a list.
+memory. You are not talking to anyone; you only produce data.
 
-Output ONE fact per line, each a standalone sentence that will still make sense in six \
-months without the surrounding conversation. Write them in the third person about the \
-user. At most 3 lines. No numbering, no bullets, no commentary.
+Every fact you return MUST be accompanied by a quote: a span copied WORD FOR WORD from \
+the conversation that states it. If you cannot copy an exact span that says it, the \
+fact does not belong in the list. Do not paraphrase the quote, do not stitch pieces \
+together, do not quote yourself.
 
 STORE ONLY: stable preferences, personal or biographical details, their hardware or \
 software setup, decisions they have made, projects they are working on, people and \
-places that recur in their life.
+places that recur in their life. Write each fact in the third person as a standalone \
+sentence that will still make sense in six months.
 
 NEVER STORE: questions they asked, facts you looked up for them, general knowledge, \
-anything about yourself, or passing conversational filler.
+anything about yourself, or conversational filler.
 
-Record only what was actually said. Do not infer, generalise or embellish: "they are \
-adjusting to a new routine" is not a fact if nobody said it. Prefer one solid line to \
-three padded ones.
+Most exchanges contain nothing durable. An empty list is the normal, correct answer \
+and is always better than a padded one."""
 
-If nothing in the exchange is durable, reply with exactly: NONE"""
+CAPTURE_FORMAT = {
+    "type": "object",
+    "properties": {
+        "facts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "fact": {"type": "string"},
+                    "quote": {"type": "string",
+                              "description": "Copied word for word from the "
+                                             "conversation."},
+                },
+                "required": ["fact", "quote"],
+            },
+        },
+    },
+    "required": ["facts"],
+}
 
 MIN_CAPTURE_CHARS = 40
+MAX_FACTS = 5
 
 
-async def _complete(system: str, user: str) -> str:
+async def _complete(system: str, user: str, fmt: dict | None = None) -> str:
     """A plain, tool-free, persona-free completion. Extraction is a different job
     from being IRiS, and giving it the persona made it answer in character."""
-    async with httpx.AsyncClient(timeout=180) as c:
-        r = await c.post(f"{OLLAMA_URL}/api/chat", json={
-            "model": settings.get("llm.model"),
+    body = {"model": settings.get("llm.model"),
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}],
-            "stream": False, "think": False,
-            "options": {"temperature": 0}})
+            "stream": False, "think": False, "options": {"temperature": 0}}
+    if fmt:
+        body["format"] = fmt
+    async with httpx.AsyncClient(timeout=180) as c:
+        r = await c.post(f"{OLLAMA_URL}/api/chat", json=body)
     if r.status_code != 200:
         raise RuntimeError(f"ollama: {r.text[:200]}")
     return (r.json().get("message") or {}).get("content", "")
+
+
+def _flat(text: str) -> str:
+    """Compare on words alone, so punctuation or spacing cannot break a real quote."""
+    return " " + " ".join(re.findall(r"[a-z0-9]+", text.lower())) + " "
 
 
 # Words that carry no evidence either way, so their presence must not vouch for a
@@ -294,12 +321,10 @@ _FILLER = {"user", "they", "their", "them", "then", "there", "that", "this", "wi
 
 
 def _grounded(fact: str, source: str) -> bool:
-    """Reject facts the conversation does not support.
+    """Does the source actually support this sentence?
 
-    An 8B model pads a list no matter how the prompt is worded: asked about a move
-    to Winterthur it also produced "they are adjusting to a new daily routine",
-    which nobody said. Arguing with the prompt did not fix it; requiring the
-    distinctive words to actually appear does, and it cannot be talked out of.
+    Used against a fact's own quote rather than the whole exchange, which is much
+    tighter: a fact must be supported by the specific span the model pointed at.
     """
     words = {w for w in re.findall(r"[a-z]{4,}", fact.lower()) if w not in _FILLER}
     if not words:
@@ -308,12 +333,29 @@ def _grounded(fact: str, source: str) -> bool:
     return sum(w in have for w in words) / len(words) >= 0.5
 
 
-def _usable(line: str) -> bool:
-    line = line.strip(" -*\u2022\t")
-    if len(line) < 12 or line.upper().startswith("NONE"):
-        return False
-    # An 8B model reliably narrates ("Here are the facts:") no matter what it is told.
-    return not line.rstrip().endswith(":")
+def evidenced(facts: list[dict], source: str) -> list[str]:
+    """Keep only facts whose quote is genuinely in the conversation.
+
+    This is the root fix for an extractor that pads its list. Asking for fewer facts
+    does not work: told "at most 3" it returns 3, and told not to infer or embellish
+    it embellishes anyway, verbatim, on the next run. Requiring a copied span moves
+    the question from "did it obey" to "is this string present", which is decidable
+    here rather than by the model. A model can invent a fact; it cannot invent a
+    quote that is already in the text.
+    """
+    flat_source = _flat(source)
+    kept = []
+    for item in facts:
+        fact = (item.get("fact") or "").strip()
+        quote = (item.get("quote") or "").strip()
+        if len(fact) < 12 or len(quote) < 8:
+            continue
+        if _flat(quote).strip() not in flat_source:
+            continue                       # the evidence is not in the conversation
+        if not _grounded(fact, quote):
+            continue                       # the quote does not support the fact
+        kept.append(fact)
+    return kept
 
 
 async def capture(exchange: list[dict], user_id: int) -> list[str]:
@@ -326,11 +368,13 @@ async def capture(exchange: list[dict], user_id: int) -> list[str]:
                           for m in exchange if m.get("role") in ("user", "assistant"))
         if len(text) < MIN_CAPTURE_CHARS:
             return []
-        reply = await _complete(CAPTURE_SYSTEM, text[:6000])
-        facts = [ln.strip(" -*\u2022\t") for ln in reply.splitlines() if _usable(ln)]
-        facts = [f for f in facts if _grounded(f, text)][:3]
+        reply = await _complete(CAPTURE_SYSTEM, text[:6000], CAPTURE_FORMAT)
+        try:
+            candidates = json.loads(reply).get("facts") or []
+        except (ValueError, AttributeError):
+            return []
         stored = []
-        for fact in facts:
+        for fact in evidenced(candidates, text)[:MAX_FACTS]:
             await remember(fact, user_id, source="learned")
             stored.append(fact)
         return stored
