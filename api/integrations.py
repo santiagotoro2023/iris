@@ -233,11 +233,25 @@ def _when(event: dict) -> str:
         return raw or "?"
 
 
+def _window(days: int) -> tuple[datetime, datetime]:
+    """Calendar days, not a rolling window.
+
+    `days=1` asked at half past ten at night used to return most of tomorrow, so
+    "what is on today" answered with tomorrow's meetings. Today means from the start
+    of today to the end of it.
+    """
+    tz = ZoneInfo(settings.get("general.timezone"))
+    local = datetime.now(tz)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=max(1, days))
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+
+
 async def _fetch_events(config: dict, days: int) -> list[dict]:
-    now = datetime.now(timezone.utc)
+    start, finish = _window(days)
     body = _CALDAV_REPORT.format(
-        start=now.strftime("%Y%m%dT%H%M%SZ"),
-        end=(now + timedelta(days=days)).strftime("%Y%m%dT%H%M%SZ"))
+        start=start.strftime("%Y%m%dT%H%M%SZ"),
+        end=finish.strftime("%Y%m%dT%H%M%SZ"))
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
         r = await c.request(
             "REPORT", config["url"],
@@ -255,14 +269,33 @@ async def _fetch_events(config: dict, days: int) -> list[dict]:
     return events
 
 
+def _day_label(event: dict) -> str:
+    """Which day it falls on, so a two-day window cannot read as one."""
+    tz = ZoneInfo(settings.get("general.timezone"))
+    when = _as_datetime(event.get("start", ""))
+    if not when:
+        return ""
+    day = when.astimezone(tz).date()
+    today = datetime.now(tz).date()
+    if day == today:
+        return "today"
+    if day == today + timedelta(days=1):
+        return "tomorrow"
+    return day.strftime("%a %d %b")
+
+
+def _as_messages(events: list[dict]) -> list[dict]:
+    return [{"from": f"{_day_label(e)} {_when(e)}".strip(),
+             "subject": e["summary"]
+             + (f" ({e['location']})" if e.get("location") else "")}
+            for e in events]
+
+
 async def _check_calendar(thing: dict, user: dict | None = None) -> dict:
     days = int(thing["config"].get("days") or 1)
     events = await _fetch_events(thing["config"], days)
     return {"calendar": thing["name"], "count": len(events),
-            "messages": [{"from": _when(e),
-                          "subject": e["summary"]
-                          + (f" ({e['location']})" if e.get("location") else "")}
-                         for e in events]}
+            "messages": _as_messages(events)}
 
 
 registry.register(registry.Type(
@@ -294,7 +327,8 @@ registry.register(registry.Type(
                        secret=True,
                        help="Create one in your account's security settings."),
         registry.Field("days", "Days ahead", type="number", default=1,
-                       help="How far forward to look. 1 is today, 7 is the week."),
+                       help="Whole days from the start of today. 1 is today only, "
+                            "2 adds tomorrow, 7 is the week."),
     ],
     actions={"check": _check_calendar},
     action_labels={"check": "what's on"},
@@ -310,17 +344,15 @@ async def _check_ics(thing: dict, user: dict | None = None) -> dict:
         r = await c.get(url)
     if r.status_code >= 300:
         raise HTTPException(502, f"the calendar link returned HTTP {r.status_code}")
-    now = datetime.now(timezone.utc)
-    horizon = now + timedelta(days=days)
+    start, finish = _window(days)
     events = []
     for event in _parse_events(r.text):
         when = _as_datetime(event.get("start", ""))
-        if when and now - timedelta(hours=12) <= when <= horizon:
+        if when and start <= when <= finish:
             events.append(event)
     events.sort(key=lambda e: e.get("start", ""))
     return {"calendar": thing["name"], "count": len(events),
-            "messages": [{"from": _when(e), "subject": e["summary"]}
-                         for e in events]}
+            "messages": _as_messages(events)}
 
 
 def _as_datetime(raw: str):
@@ -344,7 +376,8 @@ registry.register(registry.Type(
                             "then copy the ICS link. Google: Settings, your calendar, "
                             "secret address in iCal format."),
         registry.Field("days", "Days ahead", type="number", default=1,
-                       help="1 is today, 7 is the week."),
+                       help="Whole days from the start of today. 1 is today only, "
+                            "2 adds tomorrow, 7 is the week."),
     ],
     actions={"check": _check_ics},
     action_labels={"check": "what's on"},
@@ -424,7 +457,7 @@ async def check_all_calendars() -> str:
             lines.append(f"{cal['name']}: nothing scheduled.")
             continue
         lines.append(f"{cal['name']}:")
-        lines.extend(f"- {m['from']} {m['subject']}" for m in result["messages"])
+        lines.extend(f"- {m['from']}: {m['subject']}" for m in result["messages"])
     return "\n".join(lines)
 
 

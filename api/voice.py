@@ -172,7 +172,10 @@ _UNITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"
           "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
           "sixteen", "seventeen", "eighteen", "nineteen"]
 _TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty"}
-_CLOCK = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+# Colon, dot or "h", because the model writes 16:00, 08.30 and 8h30 interchangeably.
+# A trailing am/pm is swallowed so "8:30 AM" does not become "eight thirty A M A M".
+_CLOCK = re.compile(
+    r"\b([01]?\d|2[0-3])\s*([:.h])\s*([0-5]\d)\b\s*(?:([ap])\.?m\.?)?", re.I)
 
 
 def _spoken_number(n: int) -> str:
@@ -184,7 +187,19 @@ def _spoken_number(n: int) -> str:
 
 def _spoken_clock(m: re.Match) -> str:
     """07:23 read as "zero seven twenty three" is not how anyone says a time."""
-    hour, minute = int(m.group(1)), int(m.group(2))
+    raw_hour, sep, raw_minute = m.group(1), m.group(2), m.group(3)
+    # A dot is only a time separator when it cannot be a decimal: 08.30 and 16.00
+    # are times, 8.50 is a price and must be left alone.
+    if sep == "." and not (raw_hour.startswith("0") or int(raw_hour) >= 13):
+        return m.group(0)
+    hour, minute = int(raw_hour), int(raw_minute)
+    said = (m.group(4) or "").lower()
+    # If they wrote the meridiem, believe it: "8:30 PM" is not half past eight in
+    # the morning.
+    if said == "p" and hour < 12:
+        hour += 12
+    elif said == "a" and hour == 12:
+        hour = 0
     suffix = "AM" if hour < 12 else "PM"
     twelve = hour % 12 or 12
     if minute == 0:

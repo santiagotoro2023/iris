@@ -566,13 +566,69 @@ def test_a_zero_coordinate_is_not_a_location():
 
 
 def test_clock_times_are_read_as_times():
-    """"07:23" read out as "zero seven twenty three" is not how anyone says a time."""
+    """"07:23" read out as "zero seven twenty three" is not how anyone says a time.
+
+    It worked "sometimes": only for the colon. The model writes 08.30 and 8h30 too.
+    """
     assert "seven twenty three A M" in voice.speech_text("Departs 07:23.")
     assert "two o'clock P M" in voice.speech_text("Meeting at 14:00.")
     assert "eleven oh five P M" in voice.speech_text("It is 23:05.")
     assert "twelve" in voice.speech_text("At 12:30.")       # not "zero"
-    # A version number is not a time and must be left alone.
+    assert "eight thirty A M" in voice.speech_text("Um 08.30 Uhr.")
+    assert "eight thirty A M" in voice.speech_text("Um 8h30.")
+    assert "four o'clock P M" in voice.speech_text("At 16.00.")
+
+
+def test_a_written_meridiem_is_believed_not_doubled():
+    """"8:30 AM" became "eight thirty A M A M", and "8:30 pm" became half past
+    eight in the morning."""
+    assert voice.speech_text("At 8:30 AM.").count("A M") == 1
+    assert "eight thirty P M" in voice.speech_text("At 8:30 pm.")
+    assert "twelve thirty A M" in voice.speech_text("At 12:30 AM.")
+
+
+def test_a_price_is_not_a_time():
+    """A dot only separates a time when it cannot be a decimal, or "costs 8.50"
+    becomes half past eight."""
+    assert "8.50" in voice.speech_text("It costs 8.50 francs.")
     assert "1.2" in voice.speech_text("Version 1.2 is out.")
+
+
+def test_arrive_by_is_not_depart_at():
+    """"I want to be there at 08:30" is an arrival. Asking the timetable for
+    departures at 08:30 answers a different question, and it did."""
+    import datetime
+    with patch.dict(settings._overrides, {"general.timezone": "Europe/Zurich"}):
+        today = datetime.datetime.now(
+            __import__("zoneinfo").ZoneInfo("Europe/Zurich")).date()
+        assert places.parse_when("tomorrow 08:30") == (
+            str(today + datetime.timedelta(days=1)), "08:30")
+        assert places.parse_when("08:30") == ("", "08:30")
+        assert places.parse_when("2026-08-06 09:00") == ("2026-08-06", "09:00")
+        assert places.parse_when("tonight") == (str(today), "")
+        # Nothing said means nothing assumed.
+        assert places.parse_when("") == ("", "")
+        assert places.parse_when("as soon as possible") == ("", "")
+
+
+def test_today_means_today_not_the_next_24_hours():
+    """Asked at half past ten at night, a rolling window returned most of tomorrow,
+    so "what is on today" answered with tomorrow's meetings."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/Zurich")
+    with patch.dict(settings._overrides, {"general.timezone": "Europe/Zurich"}):
+        start, end = integrations._window(1)
+        local_start = start.astimezone(tz)
+        assert (local_start.hour, local_start.minute) == (0, 0)
+        assert (end - start) == datetime.timedelta(days=1)
+        # And a day is labelled, so two days cannot read as one.
+        soon = datetime.datetime.now(tz).replace(hour=16, minute=0)
+        stamp = soon.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        assert integrations._day_label({"start": stamp}) == "today"
+        later = (soon + datetime.timedelta(days=1)).astimezone(datetime.timezone.utc)
+        assert integrations._day_label(
+            {"start": later.strftime("%Y%m%dT%H%M%SZ")}) == "tomorrow"
 
 
 def test_a_bus_is_not_called_a_train():

@@ -323,12 +323,17 @@ async def _calendar():
                                      "actually named a starting point: left out, it "
                                      "uses the nearest stop to where they are."},
            "when": {"type": "string",
-                    "description": "Optional departure time as HH:MM. Omit for now."}},
+                    "description": "When, in the user's own words: '08:30', "
+                                   "'tomorrow 08:30'. Omit for now."},
+           "arrive_by": {"type": "boolean",
+                         "description": "TRUE when they want to BE there by that "
+                                        "time, FALSE when they want to leave at it."}},
        "required": ["destination"]},
       activity="Checking the timetable to {destination}", display="lines")
-async def _transit(destination: str, origin: str = "", when: str = ""):
+async def _transit(destination: str, origin: str = "", when: str = "",
+                   arrive_by: bool = False):
     import places
-    return await places.journey(origin, destination, when or None)
+    return await places.journey(origin, destination, when or None, arrive_by)
 
 
 @tool("departures",
@@ -349,14 +354,22 @@ async def _departures(station: str = ""):
       "plans public transport there. Use for 'how do I get to X' and 'how do I get "
       "there'.",
       {"type": "object",
-       "properties": {"place": {"type": "string",
-                                "description": "The place, shop, company or address "
-                                               "to travel to."}},
+       "properties": {
+           "place": {"type": "string",
+                     "description": "The place, shop, company or address to reach."},
+           "when": {"type": "string",
+                    "description": "When, in the user's own words: '08:30', "
+                                   "'tomorrow 08:30', '2026-08-06 09:00'. Omit for "
+                                   "now."},
+           "arrive_by": {"type": "boolean",
+                         "description": "TRUE when they said they want to BE there or "
+                                        "ARRIVE by that time. FALSE when they said "
+                                        "they want to LEAVE at it."}},
        "required": ["place"]},
-      activity="Working out how to get to {place}", display="lines")
-async def _route_to(place: str):
+      activity="Working out how to get to {place} {when}", display="lines")
+async def _route_to(place: str, when: str = "", arrive_by: bool = False):
     import places
-    return await places.route_to(place)
+    return await places.route_to(place, when, arrive_by)
 
 
 @tool("find_place",

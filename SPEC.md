@@ -1790,3 +1790,29 @@ It now grows to 1080 and then 1280 as the screen does, and stops there because l
 lines are harder to read, not easier. Below 720px the tabs scroll instead of wrapping,
 the composer puts the text box on its own row, and cards go single-column; below
 420px the wordmark and the quieter HUD fields step aside for the chat.
+
+
+## 49. Arriving, Today, and Times That Are Sometimes Read
+
+Three from one session of real use.
+
+**"What is my route to be there 08:30 tomorrow"** was answered with the next bus at
+04:56 and a suggestion to adjust his schedule. `route_to` took no time at all, and
+`transit`'s `when` meant *departure*. Both now take a time and an `arrive_by` flag,
+and the timetable is asked with `isArrivalTime`, which is a different question and
+has a different answer. `parse_when` takes it in one argument in his own words,
+because a model given three optional arguments fills all three: "tomorrow 08:30",
+"08:30", "2026-08-06 09:00", "next monday 07:00". Verified: four buses that all land
+before half past eight.
+
+**"What do I have in my calendar today"** listed tomorrow as well. `days=1` was a
+rolling 24 hours, so asked late at night it covered most of the next day. It now means
+whole calendar days from midnight, and each event is labelled "today", "tomorrow" or
+its date, so a wider window can never read as one day.
+
+**Times were read as times "sometimes".** Only with a colon. The model writes `08.30`
+and `8h30` as well, and both fell straight through to the synthesiser as digits. Now
+all three separators are read, and a dot counts only where it cannot be a decimal:
+`08.30` and `16.00` are times, `8.50` is a price and `1.2` is a version. A written
+meridiem is also consumed rather than repeated, so "8:30 AM" stopped becoming "eight
+thirty A M A M", and "8:30 pm" is no longer half past eight in the morning.

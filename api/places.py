@@ -11,9 +11,10 @@ whole point (SPEC.md 3.1: everything configurable is configurable in the UI).
 import asyncio
 import os
 import time
+import re
 from math import asin, cos, radians, sin, sqrt
 from urllib.parse import quote_plus
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -172,23 +173,67 @@ def _legs(conn: dict) -> str:
     return ", then ".join(out)
 
 
+_TIME = re.compile(r"\b([01]?\d|2[0-3])[:.h]([0-5]\d)\b")
+_ISO_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+             "sunday")
+
+
+def parse_when(text: str) -> tuple[str, str]:
+    """"tomorrow 08:30" -> ("2026-08-06", "08:30").
+
+    One argument rather than three, because a model given three optional arguments
+    fills all of them. Returns empty strings for whatever was not said.
+    """
+    if not text:
+        return "", ""
+    lowered = text.strip().lower()
+    today = datetime.now(ZoneInfo(settings.get("general.timezone"))).date()
+    date = ""
+    iso = _ISO_DATE.search(lowered)
+    if iso:
+        date = iso.group(1)
+    elif "day after tomorrow" in lowered:
+        date = str(today + timedelta(days=2))
+    elif "tomorrow" in lowered or "morgen" in lowered:
+        date = str(today + timedelta(days=1))
+    elif "today" in lowered or "heute" in lowered or "tonight" in lowered:
+        date = str(today)
+    else:
+        for i, name in enumerate(_WEEKDAYS):
+            if name in lowered:
+                ahead = (i - today.weekday()) % 7 or 7
+                date = str(today + timedelta(days=ahead))
+                break
+    clock = _TIME.search(lowered)
+    return date, (f"{int(clock.group(1)):02d}:{clock.group(2)}" if clock else "")
+
+
 def maps_link(origin: str, destination: str) -> str:
     """A link he can open and check, which is the point of showing the sources."""
     return ("https://www.google.com/maps/dir/?api=1&travelmode=transit"
             f"&origin={quote_plus(origin)}&destination={quote_plus(destination)}")
 
 
-async def journey(origin: str, destination: str, when: str | None = None) -> str:
+async def journey(origin: str, destination: str, when: str | None = None,
+                  arrive_by: bool = False) -> str:
     origin, destination = await resolve(origin), await resolve(destination)
     if not origin:
         return ("I do not know where you are. Set Home in Settings, or allow location "
                 "in the browser.")
+    date, clock = parse_when(when or "")
     # Two is what somebody asked "when is the next bus" actually wants. A named time
     # means they are planning, so show more.
-    limit = 4 if when else 2
+    limit = 4 if (date or clock) else 2
     params = {"from": origin, "to": destination, "limit": limit}
-    if when:
-        params["time"] = when
+    if clock:
+        params["time"] = clock
+    if date:
+        params["date"] = date
+    if arrive_by and (clock or date):
+        # "I want to be there at 08:30" is an arrival, and asking the timetable for
+        # departures at 08:30 answers a different question.
+        params["isArrivalTime"] = 1
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.get(f"{TRANSPORT_URL}/connections", params=params)
     if r.status_code != 200:
@@ -197,7 +242,12 @@ async def journey(origin: str, destination: str, when: str | None = None) -> str
     if not connections:
         return f"No connections found from {origin} to {destination}."
 
-    lines = [f"{origin} to {destination}:"]
+    heading = f"{origin} to {destination}"
+    if date or clock:
+        heading += (f", to arrive by {clock or 'then'}" if arrive_by
+                    else f", leaving after {clock or 'then'}")
+        heading += f" on {date}" if date else ""
+    lines = [heading + ":"]
     for conn in connections:
         dep, arr = conn.get("from", {}), conn.get("to", {})
         changes = conn.get("transfers")
@@ -390,7 +440,7 @@ def _walk(metres: int) -> str:
     return f"{metres} m, about {minutes} min on foot"
 
 
-async def route_to(place: str) -> str:
+async def route_to(place: str, when: str = "", arrive_by: bool = False) -> str:
     """How to actually get somewhere: find it, then plan public transport to it and
     say how far the walk is. Public transport is the default because that is what
     "how do I get there" means to somebody who asked it here.
@@ -403,7 +453,7 @@ async def route_to(place: str) -> str:
         if origin:
             # No hedging: the timetable resolved the name, and a sentence of doubt
             # made the model discard real connections and invent its own route.
-            return await journey(origin, place)
+            return await journey(origin, place, when, arrive_by)
         return f"I could not find {place!r} on the map."
     label = hit["display_name"].split(",")[0]
     town = (hit.get("address", {}).get("town")
@@ -421,7 +471,7 @@ async def route_to(place: str) -> str:
     destination = f"{label}, {town}" if town else label
     if origin:
         lines.append("")
-        lines.append(await journey(origin, destination))
+        lines.append(await journey(origin, destination, when, arrive_by))
     lines.append(f"- On the map: https://www.google.com/maps/search/"
                  f"?api=1&query={quote_plus(hit['display_name'])}")
     return "\n".join(lines)
