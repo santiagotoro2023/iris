@@ -232,33 +232,50 @@ async def deliver(text: str, user_id: int, username: str,
     return {"conversation_id": cid, "text": text, "webhooks": hooks}
 
 
-async def scheduler() -> None:
-    """Stateless, like the backup scheduler: it asks what has already been delivered
-    today rather than remembering. A restart cannot double-brief."""
+BRIEFED_KEY = "proactive:briefed"
+
+
+async def _already_briefed(day: str) -> bool:
     import chat
-    last_date = ""
+    return (await chat._redis.get(BRIEFED_KEY)) == day
+
+
+async def _mark_briefed(day: str) -> None:
+    import chat
+    await chat._redis.set(BRIEFED_KEY, day)
+
+
+async def scheduler() -> None:
+    """Remembered in Redis, not in this process.
+
+    Held in memory it did both wrong things at once: a restart re-briefed a day
+    already briefed, and there was no way to tell a missed morning from a fresh one.
+    Recorded outside the process, a restart is silent and a machine that was off at
+    seven briefs as soon as it is on.
+    """
+    # A moment for Redis to be ready, since this starts with the app.
+    await asyncio.sleep(5)
     while True:
-        await asyncio.sleep(60)
         try:
-            if not settings.get("proactive.enabled"):
-                continue
-            now = _now()
-            today = now.strftime("%Y%m%d")
-            if last_date == today:
-                continue
-            if now.strftime("%H:%M") < settings.get("proactive.briefing_at"):
-                continue
-            if in_quiet_hours(now):
-                continue
-            user = await _first_user()
-            if not user:
-                continue
-            last_date = today
-            text, sources = await compose()
-            await deliver(text, user["id"], user["username"], sources=sources)
-            print(f"[proactive] briefing delivered to {user['username']}", flush=True)
+            if settings.get("proactive.enabled"):
+                now = _now()
+                today = now.strftime("%Y%m%d")
+                due = now.strftime("%H:%M") >= settings.get("proactive.briefing_at")
+                if due and not in_quiet_hours(now) and not await _already_briefed(today):
+                    user = await _first_user()
+                    if user:
+                        await _mark_briefed(today)
+                        text, sources = await compose()
+                        await deliver(text, user["id"], user["username"],
+                                      sources=sources)
+                        late = now.strftime("%H:%M") != settings.get(
+                            "proactive.briefing_at")
+                        print(f"[proactive] briefing delivered to {user['username']}"
+                              + (" (catching up on a missed one)" if late else ""),
+                              flush=True)
         except Exception as e:
             print(f"[proactive] failed: {e}", flush=True)
+        await asyncio.sleep(60)
 
 
 async def _first_user() -> dict | None:

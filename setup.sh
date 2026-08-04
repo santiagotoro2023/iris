@@ -283,12 +283,21 @@ install() {
 
 uninstall() {
   log "Stopping containers and removing images, networks and named volumes..."
-  dc down --rmi all --volumes --remove-orphans || warn "Compose teardown reported errors; continuing."
+  # --profile cameras so Frigate is included; it does not start without the profile
+  # and would otherwise be left behind.
+  dc --profile cameras down --rmi all --volumes --remove-orphans \
+    || warn "Compose teardown reported errors; continuing."
+  # Built by ./wakeword/train.sh, outside compose, so `down --rmi all` never sees it.
+  if docker image inspect iris-wakeword-train >/dev/null 2>&1; then
+    log "Removing the wake word training image..."
+    docker image rm -f iris-wakeword-train >/dev/null 2>&1 || true
+  fi
 
   if [ "${PURGE:-0}" != 1 ]; then
     log "Kept ./data and .env."
     echo "  ./data holds all of IRiS's memory (Postgres, Qdrant, models, media)"
     echo "  and ./backup holds the encrypted archives. Neither is touched here."
+    echo "  ./data/tls holds the certificate; deleting it means trusting a new one."
     echo "  and any wake word models you trained, in ./data/wakewords."
     [ -d data/wakeword-training ] && echo "  Wake word training data is still there too:  ./wakeword/train.sh --clean"
     echo "  To remove those too:  ./setup.sh --uninstall --purge"

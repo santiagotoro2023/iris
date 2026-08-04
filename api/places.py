@@ -82,6 +82,26 @@ _HERE = {"here", "current location", "my location", "where i am", "nearby",
          "hier", "my position"}
 
 
+async def stop_near(lat: float, lon: float) -> tuple[str, int] | None:
+    """The closest real stop to any coordinate, with how far it is.
+
+    Used for the far end of a journey: planning to "Mönchaltorf" lands in the town
+    centre, when the address is 61 m from Mönchaltorf, Wihalde.
+    """
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{TRANSPORT_URL}/locations", params={"x": lon, "y": lat})
+    if r.status_code != 200:
+        return None
+    stops = [s for s in (r.json().get("stations") or [])
+             if s.get("id") and s.get("name")]
+    stops.sort(key=lambda s: s.get("distance") if s.get("distance") is not None
+               else float("inf"))
+    if not stops:
+        return None
+    best = stops[0]
+    return best["name"], int(best.get("distance") or 0)
+
+
 async def nearest_stop() -> str:
     """The stop he actually uses, if he named one; otherwise the closest."""
     preferred = settings.get("location.stop")
@@ -467,8 +487,17 @@ async def route_to(place: str, when: str = "", arrive_by: bool = False) -> str:
     here = _fixed_coordinates()
     if here:
         lines.append(f"Straight-line distance from you: {_haversine(here, target)} m.")
-    origin = await nearest_stop() or settings.get("location.home")
+
+    # Plan to the stop by the address, not to the town. The last few hundred metres
+    # are the difference between arriving at the door and arriving in the village.
+    arrival = await stop_near(*target)
     destination = f"{label}, {town}" if town else label
+    if arrival:
+        destination = arrival[0]
+        lines.append(f"Nearest stop to it: {arrival[0]}, {_walk(arrival[1])} "
+                     f"from the door.")
+
+    origin = await nearest_stop() or settings.get("location.home")
     if origin:
         lines.append("")
         lines.append(await journey(origin, destination, when, arrive_by))
@@ -477,8 +506,7 @@ async def route_to(place: str, when: str = "", arrive_by: bool = False) -> str:
     return "\n".join(lines)
 
 
-async def _lookup(query: str) -> dict | None:
-    where = settings.get("location.home") or settings.get("location.region")
+async def _search_once(query: str) -> dict | None:
     async with _nominatim_lock:
         global _last_nominatim
         wait = NOMINATIM_MIN_INTERVAL - (time.monotonic() - _last_nominatim)
@@ -486,12 +514,36 @@ async def _lookup(query: str) -> dict | None:
             await asyncio.sleep(wait)
         async with httpx.AsyncClient(timeout=20) as c:
             r = await c.get(NOMINATIM_URL,
-                            params={"q": f"{query} {where}".strip(), "format": "json",
+                            params={"q": query, "format": "json",
                                     "limit": 1, "addressdetails": 1},
                             headers={"User-Agent": USER_AGENT})
         _last_nominatim = time.monotonic()
     results = r.json() if r.status_code == 200 else []
     return results[0] if results else None
+
+
+async def _lookup(query: str) -> dict | None:
+    """As asked, then simplified, then narrowed to the region.
+
+    The map does not know "SIDMAR AG, Esslingerstrasse 32, Mönchaltorf" but knows
+    "Esslingerstrasse 32, Mönchaltorf" perfectly well: it holds addresses, not
+    company names. And appending the user's home town to a full address made it
+    match nothing at all, so the region is only added last.
+    """
+    tried = []
+    parts = [p.strip() for p in query.split(",") if p.strip()]
+    tried.append(query)
+    # Drop the leading component, which is usually the business name.
+    if len(parts) > 1:
+        tried.append(", ".join(parts[1:]))
+    where = settings.get("location.home") or settings.get("location.region")
+    if where:
+        tried.append(f"{query} {where}".strip())
+    for attempt in tried:
+        hit = await _search_once(attempt)
+        if hit:
+            return hit
+    return None
 
 
 async def find_place(query: str, near: str = "") -> str:

@@ -139,6 +139,8 @@ class SpeakRequest(BaseModel):
 _CODE_FENCE = re.compile(r"```.*?```", re.S)
 _INLINE_CODE = re.compile(r"`([^`]*)`")
 _LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+# A bare address read aloud is "h t t p s colon slash slash..." for twenty seconds.
+_URL = re.compile(r"(?:https?://|www\.)\S+")
 _EMPHASIS = re.compile(r"(\*{1,3}|_{2,3})(.+?)\1", re.S)
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
 _BULLET = re.compile(r"^\s*[-*+]\s+", re.M)
@@ -216,6 +218,7 @@ def speech_text(text: str) -> str:
     text = _CODE_FENCE.sub(" ", text)
     text = _INLINE_CODE.sub(r"\1", text)
     text = _LINK.sub(r"\1", text)
+    text = _URL.sub("", text)
     for _ in range(3):                      # ***bold italic*** nests
         text = _EMPHASIS.sub(r"\2", text)
     text = _HEADING.sub("", text)

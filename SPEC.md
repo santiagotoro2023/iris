@@ -1816,3 +1816,35 @@ all three separators are read, and a dot counts only where it cannot be a decima
 `08.30` and `16.00` are times, `8.50` is a price and `1.2` is a version. A written
 meridiem is also consumed rather than repeated, so "8:30 AM" stopped becoming "eight
 thirty A M A M", and "8:30 pm" is no longer half past eight in the morning.
+
+
+## 50. The Last Few Hundred Metres
+
+**"How to get there" went to the town, not the address.** SIDMAR AG is 61 m from
+Mönchaltorf, Wihalde, and IRiS planned to Mönchaltorf, which is the village. `route_to`
+now geocodes the destination, finds the stop nearest *those coordinates*, plans to that
+stop, and says how far the walk is. The difference is arriving at the door rather than
+in the village.
+
+Two lookup failures were behind it. The map does not know "SIDMAR AG, Esslingerstrasse
+32, Mönchaltorf" because it holds addresses, not company names; dropping the leading
+component finds it immediately. And appending the user's home town to a full address,
+which the region-narrowing did unconditionally, made it match nothing at all. Both are
+now a cascade: as asked, then simplified, then narrowed.
+
+**The voice read URLs aloud.** Markdown links were already reduced to their text, but a
+bare address was read out character by character. Stripped before synthesis.
+
+**A missed briefing is caught up.** The scheduler tracked the day in memory, which got
+both cases wrong at once: a restart re-briefed a day already done, and a machine that
+was off at seven had no way to tell a missed morning from a fresh one. Recorded in
+Redis instead, a restart is silent and a machine coming back at nine briefs
+immediately.
+
+### Install and uninstall, audited
+
+Every mounted volume is in `DATA_DIRS`, every model Ollama serves is pulled, the
+certificate is generated on install, and Frigate starts under its profile when a
+camera exists. Two gaps found and closed on the uninstall side: `down` was not passing
+`--profile cameras`, so a running Frigate would have been left behind, and the wake
+word training image is built outside compose so `--rmi all` never saw it.

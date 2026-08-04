@@ -44,6 +44,15 @@ Everything else is configured in the UI, never on the command line.
 | Web UI | http://localhost:8000/ |
 | API liveness | http://localhost:8000/healthz |
 
+## Starting with the machine
+
+Docker is enabled at boot and every service is `restart: unless-stopped`, so IRiS
+comes back on its own after a reboot or a power cut. Nothing else to set up.
+
+**A missed briefing is caught up.** If the machine was off at briefing time, the
+briefing is written as soon as it is on, and the fact that today has been briefed is
+recorded outside the process, so a restart does not produce a second one.
+
 ## Uninstall
 
 ```bash
@@ -288,10 +297,8 @@ count and whether to include conversations are all settings; the Memory tab has 
 
 ## Devices and integrations
 
-Two tabs, one mechanism. **Devices** are things in the house; **Integrations** are
-accounts and services. Both work the same way: press *add*, pick a type, fill in the
-form the type declares, and the instance appears with whatever actions that type
-supports.
+**Devices** are things in the house; **Integrations** are accounts and services.
+Press *add*, pick a type, fill in the form, and the instance appears with its actions.
 
 | | types today | actions |
 |---|---|---|
@@ -308,15 +315,11 @@ Outlook, Google and Nextcloud all speak with a username and app password, no OAu
 registration. **Push** is ntfy: notifications on your phone with no account and no
 app store, and it carries the daily briefing too.
 
-Credentials never come back out. A secret field is stored on this machine and
-returned to the browser as dots; sending the dots back means "unchanged", so editing a
-mailbox's server does not require retyping its password. ffmpeg's error text is masked
-too, since it echoes the whole URL on failure.
+Credentials never come back out: a secret is shown as dots, and sending the dots back
+means "unchanged", so changing a mailbox's server does not need the password retyped.
 
-> **Adding a type costs one `register(...)` call and no client work.** The form, the
-> validation, the list, the action buttons and the audit entries are all generic. That
-> is the point of the split: the next device or integration is a declaration, not a
-> feature.
+> Adding a type is one `register(...)` call. The form, validation, list, action buttons
+> and audit entries are all generic.
 
 **Frigate** handles the recording half: continuous recording, motion and CPU object
 detection. Its config is *generated* from the cameras you added, not hand-written, so
@@ -336,35 +339,29 @@ much of the machine it takes.
 
 ## Tools announce themselves
 
-Everything IRiS does on your behalf is a tool, and every tool says what it is doing
-while it does it — the same spinner-then-collapsed-summary the web search has always
-had. *"Checking the timetable, Winterthur to Zurich HB"*, *"Looking on the map for a
-pharmacy"*, *"Looking at the front door camera"*.
+Every tool says what it is doing while it does it: *"Checking the timetable,
+Winterthur to Zurich HB"*, *"Looking at the front door camera"*. Open the banner for
+the result and its links.
 
-That line is part of the tool's declaration, not something the UI is taught:
+The line is part of the tool's declaration:
 
 ```python
 @tool("weather", "...", {...},
       activity="Checking the weather {place}", display="lines")
 ```
 
-The label is formatted with the call's own arguments and travels on the event, so a
-new tool appears in the chat correctly with no client work at all. `display` picks how
-the result is shown — `sources` for search hits with links, `lines` for a list,
-`text` otherwise. The label is stored on the message too, so reopening a conversation
-shows the same line rather than a bare tool name.
+`display` picks how the result renders: `sources`, `lines`, or `text`. Only relevant
+tools are sent each turn, so a small model is not choosing between fifteen.
 
 ## Quick commands
 
-The lightning button in the composer picks a command — *Transit*, *Look at a camera*,
-*Check mail*, *Search the web*, *Remember this*, *Weather*, *Find a place* — and a chip appears
-above the box. What you type is then aimed at the right tool without the decision
-being taken away from the model. The command applies to one turn and clears itself,
-and the transcript stores what you actually typed, not the directive.
+The lightning button picks a command — *Transit*, *Schedule*, *Weather*, *Check
+mail*, *Look at a camera*, *Find a place*, *Search the web*, *Remember this*. What you
+type is then aimed at that tool. It applies to one message and clears itself, and the
+message shows which command it carried.
 
-Commands whose feature is switched off do not appear, because a command that steers at
-a disabled tool produces an apology rather than an answer. Adding one is a dict entry
-in `reasoning.QUICK_COMMANDS`; the menu is built from the server.
+Commands for switched-off features are hidden. Adding one is a dict entry in
+`reasoning.QUICK_COMMANDS`.
 
 ## Settings
 
