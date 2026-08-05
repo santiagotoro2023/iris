@@ -290,9 +290,16 @@ async def speak(body: SpeakRequest, user: dict = Depends(auth.active_user)):
 
 
 async def transcribe_bytes(data: bytes, filename: str = "audio.webm",
-                           content_type: str = "audio/webm") -> dict:
+                           content_type: str = "audio/webm",
+                           timeout: float = 300, timestamps: bool = False) -> dict:
     """One transcription path for the mic button and the hands-free listener alike,
-    so the configured model, language and idle-unload apply identically to both."""
+    so the configured model, language and idle-unload apply identically to both.
+
+    `timeout` is a parameter because the default is sized for a spoken sentence, and
+    a seven-minute video pushed onto the CPU needs many minutes: a fixed 300s turned
+    long videos into a silent "stt unreachable" and an answer written from the
+    pictures alone.
+    """
     form = {
         "model": settings.get("voice.stt_model"),
         "device": settings.get("voice.stt_device"),
@@ -300,14 +307,17 @@ async def transcribe_bytes(data: bytes, filename: str = "audio.webm",
         "language": settings.get("voice.stt_language"),
         "vad": str(settings.get("voice.vad")).lower(),
         "idle_unload": str(settings.get("voice.stt_idle_unload")),
+        "timestamps": str(timestamps).lower(),
     }
     try:
         # Model loads can take a while on first use or after a settings change.
-        async with httpx.AsyncClient(timeout=300) as c:
+        async with httpx.AsyncClient(timeout=timeout) as c:
             r = await c.post(f"{STT_URL}/transcribe", data=form,
                              files={"audio": (filename, data, content_type)})
     except Exception as e:
-        raise HTTPException(502, f"stt unreachable: {e}")
+        # str() on a timeout is the empty string, which made the log read
+        # "stt unreachable:" and say nothing about why.
+        raise HTTPException(502, f"stt unreachable: {e or type(e).__name__}")
     if r.status_code != 200:
         raise HTTPException(502, f"stt: {r.text[:300]}")
     return r.json()

@@ -28,6 +28,9 @@ import settings
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 MAX_BYTES = 20 * 1024 * 1024
 MAX_DOC_CHARS = 20_000
+# Audio is transcribed in slices this long, so one slow chunk cannot take the whole
+# transcription down with it.
+TRANSCRIBE_CHUNK_SECONDS = 300
 
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
@@ -241,23 +244,93 @@ async def _duration(path: Path) -> float:
         return 0.0
 
 
-async def describe_video(path: Path, question: str = "") -> str:
-    """Sample frames across the whole video, and transcribe whatever is said.
+def _stamp(seconds: float) -> str:
+    return f"{int(seconds // 60):02d}:{int(seconds % 60):02d}"
 
-    Evenly spaced rather than the first N seconds: a video's subject is rarely in
-    its opening frame, and consecutive frames say almost the same thing.
+
+async def transcribe_video(path: Path, seconds: float) -> tuple[list[str], str]:
+    """The speech, in chunks, with timestamps. Returns the lines and any failure.
+
+    Chunked because a whole file is one unbounded request: 435 seconds of audio
+    pushed onto the CPU (the GPU being full of the language model) ran past the
+    300-second client timeout, the failure was swallowed, and the reply was written
+    from the pictures alone. A chunk is bounded, and a chunk that fails costs only
+    its own minutes rather than the whole transcription.
+    """
+    import voice
+    lines: list[str] = []
+    step = TRANSCRIBE_CHUNK_SECONDS
+    total = seconds or step
+    at = 0.0
+    while at < total:
+        span = min(step, total - at)
+        try:
+            wav = await _run("ffmpeg", "-nostdin", "-loglevel", "error",
+                             "-ss", f"{at:.2f}", "-t", f"{span:.2f}", "-i", str(path),
+                             "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", "-",
+                             timeout=300)
+        except Exception as e:
+            return lines, f"the audio could not be extracted ({e})"
+        if not wav or len(wav) < 1000:
+            break
+        try:
+            # Whisper is roughly real-time on the CPU it falls back to; the margin
+            # covers a cold model load on top of that.
+            result = await voice.transcribe_bytes(
+                wav, "video.wav", "audio/wav",
+                timeout=max(300.0, span * 4), timestamps=True)
+        except Exception as e:
+            note = (f"the audio after {_stamp(at)} could not be transcribed ({e})"
+                    if lines else f"the audio could not be transcribed ({e})")
+            return lines, note
+        for span_ in result.get("segments") or []:
+            text = (span_.get("text") or "").strip()
+            if text:
+                lines.append(f"[{_stamp(at + span_.get('start', 0))}] {text}")
+        if not result.get("segments"):
+            whole = (result.get("text") or "").strip()
+            if whole:
+                lines.append(f"[{_stamp(at)}] {whole}")
+        at += span
+    return lines, ""
+
+
+async def describe_video(path: Path, question: str = "") -> str:
+    """What is said first, then what is seen.
+
+    Speech leads because it is almost always the point of an uploaded video, and
+    because six sentences of scene description ahead of it were enough for the model
+    to answer about the background instead of the content.
+
+    Frames are evenly spaced rather than the first N seconds: a video's subject is
+    rarely in its opening frame, and consecutive frames say almost the same thing.
     """
     frames = settings.get("vision.video_frames")
     seconds = await _duration(path)
+    parts: list[str] = []
+    if seconds:
+        parts.append(f"Video, {int(seconds // 60)}m {int(seconds % 60)}s long.")
+
+    spoken, failure = await transcribe_video(path, seconds)
+    if spoken:
+        body = "\n".join(spoken)
+        if len(body) > MAX_DOC_CHARS:
+            body = body[:MAX_DOC_CHARS] + "\n[...transcript truncated]"
+        parts.append("TRANSCRIPT (what is said, this is the content of the video):\n"
+                     + body)
+    elif failure:
+        # Said out loud rather than logged. Silence here reads as "nothing was said",
+        # and the model then answers confidently from the scenery.
+        print(f"[files] video audio failed: {failure}", flush=True)
+        parts.append(f"No transcript: {failure}. Do not guess at what was said.")
+    else:
+        parts.append("No speech in this video.")
+
     # The image prompt asks for detail, which is right for one picture and useless
     # for six: it produced 200 words a frame about colour calibration.
     prompt = (f"{question.strip()} Answer in one short sentence." if question.strip()
               else "In one short sentence, say what is visible here. No preamble, no "
                    "explanation, no offer of help.")
-    parts: list[str] = []
-    if seconds:
-        parts.append(f"Video, {int(seconds // 60)}m {int(seconds % 60)}s long.")
-
     described = []
     for i in range(frames):
         at = (seconds * (i + 0.5) / frames) if seconds else i * 2
@@ -272,26 +345,13 @@ async def describe_video(path: Path, question: str = "") -> str:
         except Exception as e:
             print(f"[files] frame at {at:.1f}s failed: {e}", flush=True)
             continue
-        stamp = f"{int(at // 60):02d}:{int(at % 60):02d}"
         one_line = " ".join(text.split())[:220]
         if described and one_line == described[-1].split("] ", 1)[-1]:
             continue          # a static shot repeats; say it once
-        described.append(f"[{stamp}] {one_line}")
+        described.append(f"[{_stamp(at)}] {one_line}")
     if described:
-        parts.append("What is visible:\n" + "\n".join(described))
-
-    try:
-        wav = await _run("ffmpeg", "-nostdin", "-loglevel", "error", "-i", str(path),
-                         "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", "-",
-                         timeout=300)
-        if wav and len(wav) > 1000:
-            import voice
-            result = await voice.transcribe_bytes(wav, "video.wav", "audio/wav")
-            spoken = (result.get("text") or "").strip()
-            if spoken:
-                parts.append("What is said:\n" + spoken)
-    except Exception as e:
-        print(f"[files] video audio failed: {e}", flush=True)
+        parts.append("SCENERY (what the camera shows, background only):\n"
+                     + "\n".join(described))
 
     return "\n\n".join(parts) or "(nothing readable in that video)"
 

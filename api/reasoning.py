@@ -480,6 +480,18 @@ def search(query: str, category: str = "", limit: int = 6,
     asked for "top world news headlines today" and was handed a 2015 story about
     Charlie Hebdo, which is worse than no news at all.
     """
+    results = hits(query, category, limit, time_range, max_age_days)
+    if isinstance(results, str):
+        return results
+    if not results:
+        return f"No results for {query!r}."
+    return format_hits(results)
+
+
+def hits(query: str, category: str = "", limit: int = 6, time_range: str = "",
+         max_age_days: int = 0) -> list[dict] | str:
+    """The raw results, so a caller that merges several searches (the briefing) can
+    dedupe before formatting rather than gluing two rendered blocks together."""
     params = {"q": query, "format": "json"}
     if category:
         params["categories"] = category
@@ -503,11 +515,16 @@ def search(query: str, category: str = "", limit: int = 6,
             except ValueError:
                 continue
             if when.timestamp() >= cutoff:
+                item["_at"] = when.timestamp()
                 fresh.append(item)
+        # Newest first. In relevance order the freshest story is often the one the
+        # limit cuts off, which is the wrong way round for news.
+        fresh.sort(key=lambda i: i["_at"], reverse=True)
         results = fresh
-    results = results[:limit]
-    if not results:
-        return f"No results for {query!r}."
+    return results[:limit]
+
+
+def format_hits(results: list[dict]) -> str:
     lines = []
     for item in results:
         snippet = (item.get("content") or "").strip().replace("\n", " ")

@@ -103,6 +103,7 @@ async def transcribe(
     language: str = Form("auto"),
     vad: bool = Form(True),
     idle_unload: float = Form(-1.0),
+    timestamps: bool = Form(False),
 ):
     global _idle_unload
     if idle_unload >= 0:
@@ -126,12 +127,14 @@ async def transcribe(
             vad_filter=vad,
             beam_size=5,
         )
-        return "".join(s.text for s in segments).strip(), info
+        spans = [{"start": round(s.start, 2), "end": round(s.end, 2),
+                  "text": s.text.strip()} for s in segments]
+        return "".join(" " + s["text"] for s in spans).strip(), spans, info
 
     try:
         try:
-            text, info = run("cpu" if on_cpu else device,
-                             "int8" if on_cpu else compute)
+            text, spans, info = run("cpu" if on_cpu else device,
+                                    "int8" if on_cpu else compute)
         except Exception as e:
             if on_cpu or not _is_oom(e):
                 raise
@@ -143,13 +146,16 @@ async def transcribe(
                 _release()
             _cpu_until = time.monotonic() + CPU_FALLBACK_SECONDS
             on_cpu = True
-            text, info = run("cpu", "int8")
+            text, spans, info = run("cpu", "int8")
     except Exception as e:
         raise HTTPException(500, f"transcription failed: {e}")
     finally:
         os.unlink(path)
 
-    return {"text": text, "language": info.language,
-            "language_probability": round(info.language_probability, 3),
-            "duration": round(info.duration, 2),
-            "device": "cpu" if on_cpu else device}
+    out = {"text": text, "language": info.language,
+           "language_probability": round(info.language_probability, 3),
+           "duration": round(info.duration, 2),
+           "device": "cpu" if on_cpu else device}
+    if timestamps:
+        out["segments"] = spans
+    return out

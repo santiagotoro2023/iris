@@ -1929,3 +1929,56 @@ already has.
 paste anywhere on the chat tab attaches whatever the clipboard holds, which is how a
 screenshot actually arrives. The paste is only intercepted when the clipboard carries
 files, so pasting text still pastes text.
+
+## 54. A Briefing That Says What Happened, and a Video That Is Listened To
+
+Santiago: *"the briefing is incredibly bland, has no news from switzerland and does
+not explain what the headlines actually mean / doesent expand on it, i want a
+briefing that yknow actually tells me whats happening not just headlines and not even
+swiss ones in the mix, the briefing should also include the weather at my set home
+location in the settings. video transcription isnt great, it just analyzes the
+background etc. but not whats actualy being said in the video which is kind of the
+point of 99% of video media id be uploading."*
+
+Three separate faults, one symptom each.
+
+**No Swiss news.** The regional search was built from `location.home`, so it asked
+for "Oetwil am See news". A village of 4,000 has no news wire, the search returned
+nothing, and the whole section was dropped silently. It now searches
+`location.region`. Compounding it, a one-day `time_range` starved the engines before
+the age filter ever ran: "Switzerland news" over a day returned four results, none of
+them dated. The window is now a week and `max_age_days` is what actually decides
+freshness, two phrasings per section are merged and deduped by URL, and results are
+sorted newest first rather than by relevance, because in relevance order the freshest
+story is the one the limit cuts off.
+
+**Bland.** Only the *titles* went into the notes. The model could not expand on what
+it was never given, so it read headlines back. Titles now carry the story's first
+line, and the prompt asks for what happened and why it matters.
+
+**Missing weather.** The weather was gathered correctly every time and the model
+simply dropped it, along with anything else it felt like, on the way to the news.
+The prompt now requires every section present in the notes. Written loosely
+("cover every section: weather, appointments, mail, the journey") it went the other
+way and invented an appointment with the local council and a visa interview, so the
+rule is stated in both directions: a section in the notes must not be dropped, and a
+subject absent from the notes must not be mentioned at all.
+
+**The video.** `[files] video audio failed: 502: stt unreachable:` — with nothing
+after the colon, because `str()` of an httpx timeout is the empty string. A 435
+second video was extracted whole and sent as one request against a 300 second
+timeout, and whisper had fallen back to the CPU because the language model held the
+GPU. The transcription never returned, the exception was swallowed, and the answer
+was written from six frames of scenery. Hence "it just analyzes the background".
+
+Audio is now transcribed in five-minute chunks with a timeout scaled to each chunk,
+so a chunk that fails costs its own minutes rather than the whole transcription, and
+the STT service returns timestamped segments so the transcript reads as a timeline.
+The transcript is printed **first** and labelled as the content of the video, with
+the frame descriptions after it and labelled as background: six sentences of scene
+description ahead of the speech were enough on their own to make the model answer
+about the wallpaper. When there is no transcript the reason is stated in the text the
+model reads, rather than logged where only I would see it.
+
+Verified on the file that failed: 66 timestamped segments across the full seven
+minutes, where before there were none.

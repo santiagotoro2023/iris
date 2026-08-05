@@ -99,32 +99,66 @@ def in_quiet_hours(when: datetime | None = None) -> bool:
     return now >= start or now < end
 
 
+# Two phrasings per section, merged. One query is one engine's idea of the news:
+# "Switzerland news" with a one-day window returned four undated results and nothing
+# survived the freshness filter, so the whole Swiss half of the briefing vanished.
+NEWS_MAX_AGE_DAYS = 2
+NEWS_PER_SECTION = 4
+
+
+async def _section(label: str, queries: list[str]) -> dict | None:
+    """Merge several searches into one source list, newest first, deduped by URL.
+
+    The window is a week and the age filter is what actually decides freshness: a
+    one-day window starves the engines of results before the filter ever runs.
+    """
+    import reasoning
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for query in queries:
+        try:
+            found = await asyncio.to_thread(
+                reasoning.hits, query, "news", 10, "week", NEWS_MAX_AGE_DAYS)
+        except Exception as e:
+            print(f"[proactive] news search {query!r} failed: {e}", flush=True)
+            continue
+        if isinstance(found, str):
+            continue
+        for item in found:
+            url = item.get("url") or ""
+            if url and url not in seen:
+                seen.add(url)
+                merged.append(item)
+    # An empty search is left out rather than reported as "no news today", which
+    # would be a claim about the world instead of about the search.
+    if not merged:
+        return None
+    merged.sort(key=lambda i: i.get("_at", 0), reverse=True)
+    merged = merged[:NEWS_PER_SECTION]
+    # Title plus the story's first line. Titles alone were all the model had, so all
+    # it could do was read them back, and a briefing that repeats a headline and
+    # stops has told you nothing a ticker would not.
+    stories = [f"{(i.get('title') or '').strip()}. "
+               f"{' '.join((i.get('content') or '').split())[:320]}".strip()
+               for i in merged]
+    return {"role": "tool", "tool_name": "web_search",
+            "label": f"Headlines from {label}", "display": "sources",
+            "content": reasoning.format_hits(merged), "titles": stories}
+
+
 async def news() -> list[dict]:
     """Headlines as tool messages, so the briefing carries its sources exactly the
-    way a live web search does and the same collapsed list renders them."""
-    import reasoning
-    region = settings.get("location.home") or settings.get("location.region")
-    out = []
-    for label, query in (("the world", "world news"), (region, f"{region} news")):
-        try:
-            content = await asyncio.to_thread(
-                reasoning.search, query, "news", 4, "day", 2)
-        except Exception as e:
-            print(f"[proactive] news search failed: {e}", flush=True)
-            continue
-        # An empty or failed search is left out rather than reported as "no news
-        # today", which would be a claim about the world instead of about the search.
-        if content.startswith("search failed") or content.startswith("No results"):
-            continue
-        # Titles only for the notes. Feeding the model the full block, URLs and
-        # snippets and all, buried the weather and the journey under 800 characters
-        # of news and it simply stopped mentioning them.
-        titles = [line[2:].split(" <")[0].strip()
-                  for line in content.splitlines() if line.startswith("- ")]
-        out.append({"role": "tool", "tool_name": "web_search",
-                    "label": f"Headlines from {label}", "display": "sources",
-                    "content": content, "titles": titles})
-    return out
+    way a live web search does and the same collapsed list renders them.
+
+    Regional news is searched by region, not by home address: "Oetwil am See news"
+    returns nothing at all, which is why only world headlines ever survived.
+    """
+    region = settings.get("location.region") or "Switzerland"
+    sections = await asyncio.gather(
+        _section("the world", ["world news", "international news today"]),
+        _section(region, [region, f"{region} news"]),
+    )
+    return [s for s in sections if s]
 
 
 async def gather() -> tuple[list[str], list[dict]]:
@@ -180,17 +214,26 @@ async def gather() -> tuple[list[str], list[dict]]:
 
 
 BRIEFING_PROMPT = """\
-Write the morning briefing from the notes below. Rules:
+Write the briefing from the notes below.
+
+Cover every section that IS in the notes, in the order given, and nothing else.
+A section in the notes must not be dropped; a subject absent from the notes must
+not be mentioned at all. If there is no calendar section, say nothing whatsoever
+about appointments. If there is no mail section, say nothing about mail. If there
+is no journey section, say nothing about trains or travel. Inventing one is worse
+than a short briefing.
+
+For the news, take the three or four most consequential stories across all the
+headline sections and write a sentence or two on each SAYING WHAT HAPPENED AND WHY
+IT MATTERS, in your own words, using the detail given after each headline. A
+briefing that only repeats headlines is useless. Never repeat a headline verbatim.
+Do not include links; they are attached separately.
 
 Use ONLY what is in the notes. Do not add weather, news, appointments or anything
-else that is not there, and do not apologise for what is missing.
-Where the notes contain headlines, give two or three of the most consequential in
-one line each, in your own words. Do not include the links; they are attached
-separately.
-Keep it to a few sentences. No headers, no bullet points unless the notes contain a
-list of things, no sign-off, no offer of further help.
+that is not there, and do not apologise for what is missing.
 Open with the exact greeting the notes give you, once, and never a different one.
 Do not state the date or the time back to them unless something depends on it.
+Prose, not bullet points. No headers, no sign-off, no offer of further help.
 
 NOTES:
 """
@@ -202,7 +245,7 @@ async def compose() -> tuple[str, list[dict]]:
     if len(facts) <= 2:            # the time and the greeting, and nothing else
         return f"{greeting(_now())} Nothing to report.", sources
     try:
-        text = await memory._complete(BRIEFING_PROMPT + "\n".join(facts), "")
+        text = await memory._complete(BRIEFING_PROMPT + "\n\n".join(facts), "")
     except Exception as e:
         print(f"[proactive] wording failed, sending the notes: {e}", flush=True)
         return "\n".join(facts), sources

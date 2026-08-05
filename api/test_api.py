@@ -21,6 +21,7 @@ import registry
 import settings
 import backup
 import cameras
+import files
 import memory
 import voice
 
@@ -738,6 +739,68 @@ def test_quiet_hours_wrap_midnight():
     with patch.dict(settings._overrides, {"proactive.quiet_from": "00:00",
                                           "proactive.quiet_to": "00:00"}):
         assert not proactive.in_quiet_hours(at(3))
+
+
+def test_regional_news_is_searched_by_region_not_by_home_address():
+    """"Oetwil am See news" returns nothing, so the Swiss half of every briefing
+    silently vanished and only world headlines survived."""
+    import asyncio
+    asked = []
+
+    def fake_hits(query, category="", limit=6, time_range="", max_age_days=0):
+        asked.append(query)
+        return [{"title": "T", "url": f"https://x/{query}", "content": "detail",
+                 "_at": 1.0}]
+
+    with patch.dict(settings._overrides, {"location.home": "Oetwil am See",
+                                          "location.region": "Switzerland"}):
+        with patch.object(reasoning, "hits", fake_hits):
+            sections = asyncio.run(proactive.news())
+
+    assert not any("Oetwil" in q for q in asked), asked
+    assert any("Switzerland" in q for q in asked), asked
+    assert [s["label"] for s in sections] == ["Headlines from the world",
+                                              "Headlines from Switzerland"]
+
+
+def test_a_headline_carries_its_story_into_the_notes():
+    """Titles alone were all the model had, so all it could do was read them back.
+    The snippet is what lets a briefing say what actually happened."""
+    import asyncio
+    hits = [{"title": "Accounts frozen", "url": "https://a", "_at": 2.0,
+             "content": "A state-owned lender froze the accounts over debt."},
+            {"title": "Accounts frozen", "url": "https://a", "_at": 2.0,
+             "content": "duplicate, same URL"},
+            {"title": "Older", "url": "https://b", "content": "older story",
+             "_at": 1.0}]
+    with patch.object(reasoning, "hits", lambda *a, **k: hits):
+        section = asyncio.run(proactive._section("the world", ["q1", "q2"]))
+
+    assert "froze the accounts over debt" in section["titles"][0]
+    # Deduped by URL across both queries, and newest first.
+    assert len(section["titles"]) == 2
+    assert section["titles"][1].startswith("Older")
+
+
+def test_a_video_that_cannot_be_transcribed_says_so_out_loud():
+    """Swallowed, the failure read as "nothing was said" and the model answered
+    confidently from the scenery instead."""
+    import asyncio
+    from pathlib import Path
+
+    async def no_frames(*a, **k):
+        raise RuntimeError("no ffmpeg here")
+
+    async def no_speech(path, seconds):
+        return [], "the audio could not be transcribed (timeout)"
+
+    with patch.object(files, "transcribe_video", no_speech), \
+         patch.object(files, "_run", no_frames), \
+         patch.dict(settings._overrides, {"vision.video_frames": 2}):
+        out = asyncio.run(files.describe_video(Path("/nope.mp4")))
+
+    assert "No transcript" in out and "could not be transcribed" in out
+    assert "Do not guess" in out
 
 
 def test_secret_fields_never_reach_a_client():
