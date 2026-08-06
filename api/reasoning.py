@@ -102,6 +102,14 @@ TRIGGERS: dict[str, tuple[str, ...]] = {
                "what timers", "still running"),
     "camera_events": ("camera", "saw", "noticed", "motion", "detected", "doorbell",
                       "who came", "anyone at", "delivery", "parcel"),
+    "about_myself": ("how are you built", "how do you work", "what are you made of",
+                     "your architecture", "what can you do", "your tools",
+                     "capabilities", "how do you store", "what model are you"),
+    "what_did_i_do": ("what did you do", "what have you been doing", "why did you",
+                      "did you send", "did you already", "earlier today",
+                      "your log", "have you"),
+    "propose_change": ("change how you", "stop doing", "start doing", "from now on",
+                       "be more", "be less", "adjust yourself", "change your"),
 }
 
 _tool_vectors: dict[str, list[float]] | None = None
@@ -603,6 +611,64 @@ async def _timers(cancel: str = ""):
 async def _camera_events(hours: float = 12, camera: str = "", objects: str = ""):
     import events
     return await events.describe(hours, camera, objects)
+
+
+@tool("about_myself",
+      "How you are built and what you can do: your model, your tools, your memory, "
+      "your storage. Required for any question about your own architecture or "
+      "capabilities. Do not answer those from imagination.",
+      {"type": "object",
+       "properties": {"topic": {"type": "string",
+                                "description": "Narrow it: 'tools', 'memory', "
+                                               "'briefings', 'settings', 'storage'. "
+                                               "OMIT for the whole picture."}}},
+      activity="Looking at how I am built", display="lines")
+async def _about_myself(topic: str = ""):
+    import introspect
+    return await introspect.describe(topic)
+
+
+@tool("what_did_i_do",
+      "Your own record of what you actually did and when, from the audit log. Use for "
+      "'why did you do that', 'what have you been doing', 'did you send that'. This "
+      "is a record, not a memory: report it, do not embellish it.",
+      {"type": "object",
+       "properties": {
+           "about": {"type": "string",
+                     "description": "Narrow it to one kind of action, e.g. 'briefing', "
+                                    "'timer', 'backup'. OMIT for everything."},
+           "hours": {"type": "number",
+                     "description": "How far back to look. Default 24."}}},
+      activity="Looking back over what I did", display="lines")
+async def _what_did_i_do(about: str = "", hours: float = 24):
+    import introspect
+    return await introspect.history(about, hours)
+
+
+@tool("propose_change",
+      "Suggest a change to your OWN configuration, for the user to approve. It is "
+      "queued, never applied. Only when the user has asked you to change how you "
+      "behave, or has complained about something you can actually fix this way.",
+      {"type": "object",
+       "properties": {
+           "kind": {"type": "string", "enum": ["setting", "persona", "tool", "command"],
+                    "description": "What sort of thing changes."},
+           "target": {"type": "string",
+                      "description": "Which one: a setting key like 'llm.think', a "
+                                     "tool name, or a quick command name. For a "
+                                     "persona change this is 'persona.prompt'."},
+           "value": {"type": "string",
+                     "description": "The complete new value, not a description of it."},
+           "reason": {"type": "string",
+                      "description": "Why. This is all the reviewer sees."},
+           "field": {"type": "string", "enum": ["", "description", "triggers"],
+                     "description": "For a tool only: which part. OMIT otherwise."}},
+       "required": ["kind", "target", "value", "reason"]},
+      activity="Proposing a change to {target}", display="text")
+async def _propose_change(kind: str, target: str, value: str, reason: str,
+                          field: str = ""):
+    import proposals
+    return await proposals.propose(kind, target, value, reason, field)
 
 
 @tool("web_search",

@@ -24,7 +24,9 @@ import briefings
 import cameras
 import chat
 import files
+import introspect
 import memory
+import proposals
 import rules
 import toolkit
 import voice
@@ -978,6 +980,77 @@ def test_a_conversation_exports_as_readable_markdown():
     # An assistant turn that only called a tool has nothing to show.
     assert text.count("## IRiS") == 1
 
+
+
+def test_what_iris_knows_about_itself_is_counted_not_written_down():
+    """A hand-written architecture summary is right on the day it is written and
+    quietly wrong a month later, which reads as authoritative and is worse than
+    having none."""
+    facts = introspect.architecture()
+    assert set(facts["tools"]) == set(reasoning.TOOLS)
+    assert set(facts["tools_always_offered"]) == set(reasoning.CORE_TOOLS)
+    assert set(facts["briefing_widgets"]) == set(briefings.WIDGETS)
+    assert set(facts["automation_triggers"]) == set(rules.TRIGGERS)
+    assert facts["setting_count"] == len(settings.REGISTRY)
+
+
+def test_a_registered_tool_shows_up_in_the_self_description():
+    """The whole point of generating it: something added later needs no edit here."""
+    import asyncio
+
+    spec = reasoning.Tool(schema={"type": "function",
+                                  "function": {"name": "invented_later",
+                                               "description": "d",
+                                               "parameters": {}}},
+                          fn=lambda: "")
+    with patch.dict(reasoning.TOOLS, {"invented_later": spec}):
+        text = asyncio.run(introspect.describe("tools"))
+    assert "invented_later" in text
+
+
+def test_a_topic_narrows_what_iris_says_about_itself():
+    """Handed everything it is made of, an 8B model asked about memory answers about
+    the cameras."""
+    import asyncio
+    memory_text = asyncio.run(introspect.describe("memory"))
+    assert "Qdrant" in memory_text
+    assert "Automations" not in memory_text
+    assert "match" in asyncio.run(introspect.describe("nonsense topic"))
+
+
+def test_a_proposed_number_is_given_the_type_the_setting_actually_has():
+    """The tool takes value as a string on purpose, because an 8B model handles one
+    argument type far better than a union and says "7" for a number every time. The
+    settings service rightly refuses a string where an integer belongs."""
+    assert proposals._coerce("setting", "llm.tool_budget", "7") == 7
+    assert proposals._coerce("setting", "voice.tts_speed", "1.4") == 1.4
+    assert proposals._coerce("setting", "proactive.enabled", "false") is False
+    assert proposals._coerce("setting", "proactive.enabled", "yes") is True
+    # A string setting is left exactly alone.
+    assert proposals._coerce("setting", "location.home", "Oetwil") == "Oetwil"
+    # And a kind that is not a setting has no schema to coerce against.
+    assert proposals._coerce("persona", "persona.prompt", "text") == "text"
+
+
+def test_a_proposal_names_something_that_exists():
+    import pytest
+    from fastapi import HTTPException
+    for kind, target in (("setting", "llm.no_such_setting"),
+                         ("tool", "no_such_tool"),
+                         ("command", "no_such_command")):
+        with pytest.raises(HTTPException):
+            proposals._current(kind, target, "")
+    with pytest.raises(HTTPException):
+        proposals._current("nonsense", "x", "")
+
+
+def test_reverting_a_tool_edit_restores_the_declared_wording_not_a_copy_of_it():
+    """Storing the shipped wording as an override would freeze it: a later version
+    with better wording would be silently ignored. Blank clears the override."""
+    declared = proposals._declared_tool("weather")
+    assert declared["description"] == \
+        reasoning.TOOLS["weather"].schema["function"]["description"]
+    assert declared["triggers"] == ", ".join(reasoning.TRIGGERS["weather"])
 
 
 def test_secret_fields_never_reach_a_client():

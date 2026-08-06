@@ -30,10 +30,12 @@ import events
 import files
 import frigate
 import integrations
+import introspect
 import memory
 import persona
 import places
 import proactive
+import proposals
 import registry
 import reasoning
 import rules
@@ -111,6 +113,7 @@ async def lifespan(app: FastAPI):
     await briefings.init()
     await rules.init()
     await timers.init()
+    await proposals.init()
     asyncio.create_task(backup.scheduler())
     asyncio.create_task(memory.compactor())
     asyncio.create_task(briefings.scheduler())
@@ -153,6 +156,8 @@ app.include_router(rules.router, dependencies=_gate)
 app.include_router(toolkit.router, dependencies=_gate)
 app.include_router(timers.router)   # its SSE stream authenticates per route
 app.include_router(events.router, dependencies=_gate)
+app.include_router(introspect.router, dependencies=_gate)
+app.include_router(proposals.router, dependencies=_gate)
 app.include_router(frigate.router)
 
 

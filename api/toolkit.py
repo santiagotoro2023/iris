@@ -47,9 +47,17 @@ GROUPS = {
     "analyze_file": "Files",
     "look_at_camera": "Home",
     "system_status": "System",
+    "about_myself": "Itself",
+    "what_did_i_do": "Itself",
+    "propose_change": "Itself",
+    "briefing": "Proactive",
+    "set_timer": "Proactive",
+    "set_alarm": "Proactive",
+    "timers": "Proactive",
+    "camera_events": "Home",
 }
-GROUP_ORDER = ["Knowledge", "Places", "Integrations", "Memory", "Files", "Home",
-               "System", "Other"]
+GROUP_ORDER = ["Knowledge", "Places", "Integrations", "Proactive", "Memory", "Files",
+               "Home", "System", "Itself", "Other"]
 
 # name -> {"enabled": bool, "description": str, "triggers": str}. Absent means no
 # override at all, which is not the same as an override that happens to match the

@@ -17,6 +17,7 @@ const SECTIONS = [
   {id: "tools", label: "Tools", render: renderTools},
   {id: "commands", label: "Quick commands", render: renderCommands},
   {id: "persona", label: "Persona", render: renderPersona},
+  {id: "self", label: "Self", render: renderSelf},
 ];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({length: 24}, (_, h) => String(h).padStart(2, "0") + ":00");
@@ -860,6 +861,127 @@ async function renderPersona(host) {
                {"persona.prompt": props["persona.prompt"].default}, "PUT");
     show("persona");
   }), note));
+  host.append(box);
+}
+
+/* ----------------------------------------------------------------- self -- */
+
+const PROPOSAL_WORDS = {
+  setting: "a setting", persona: "its persona", tool: "a tool's instructions",
+  command: "a quick command",
+};
+
+function diff(before, after) {
+  const box = el("div", "cz-diff");
+  const left = el("div", "cz-diff-side");
+  left.append(el("div", "cz-subhead", "now"), el("pre", null, String(before ?? "")));
+  const right = el("div", "cz-diff-side after");
+  right.append(el("div", "cz-subhead", "proposed"),
+               el("pre", null, String(after ?? "")));
+  box.append(left, right);
+  return box;
+}
+
+async function renderSelf(host) {
+  const [me, queue] = await Promise.all([json("self"), json("proposals")]);
+  const a = me.architecture;
+
+  const known = panel("What IRiS is");
+  known.append(el("div", "cz-explain",
+    "Counted from what is actually registered, not written down anywhere. A tool "
+    + "added tomorrow appears here tomorrow. IRiS answers questions about itself from "
+    + "this same source, which is what stops it inventing a west wing."));
+  const facts = [
+    ["Thinking", `${a.model}, reasoning ${a.reasoning_mode}`],
+    ["Seeing", a.vision_model],
+    ["Hearing", `faster-whisper ${a.speech_model}`],
+    ["Speaking", a.voice],
+    ["Tools", `${a.tools.length}, of which ${a.tools_always_offered.length} always `
+              + `offered and up to ${a.tool_budget} more chosen per message`],
+    ["Briefing widgets", a.briefing_widgets.join(", ")],
+    ["Automation triggers", a.automation_triggers.join(", ")],
+    ["Devices", a.device_types.join(", ")],
+    ["Integrations", a.integration_types.join(", ")],
+    ["Settings", `${a.setting_count}`],
+  ];
+  if (a.disabled_tools.length) facts.push(["Tools switched off", a.disabled_tools.join(", ")]);
+  if (a.edited_tools.length) facts.push(["Tools with edited wording", a.edited_tools.join(", ")]);
+  if (me.live?.uptime) facts.push(["Up for", me.live.uptime]);
+  if (me.live?.gpu) {
+    facts.push(["GPU", `${me.live.gpu.name}, ${me.live.gpu.percent}% at `
+                       + `${me.live.gpu.celsius}C, ${me.live.gpu.used_mb} of `
+                       + `${me.live.gpu.total_mb} MB`]);
+  }
+  for (const [label, value] of facts) {
+    const row = el("div", "cz-fact");
+    row.append(el("span", "cz-fact-key", label), el("span", null, value));
+    known.append(row);
+  }
+  host.append(known);
+
+  const box = panel("Proposed changes");
+  box.append(el("div", "cz-explain",
+    "IRiS can suggest a change to its own configuration. It cannot make one. Every "
+    + "proposal waits here with the current value beside it, and anything you approve "
+    + "can be undone in one press. It cannot propose changes to its own code, "
+    + "deliberately: see SPEC.md 56."));
+
+  const pending = queue.proposals.filter(p => p.status === "pending");
+  const rest = queue.proposals.filter(p => p.status !== "pending");
+  if (!queue.proposals.length) {
+    box.append(el("div", "empty", "Nothing proposed. IRiS suggests a change when you "
+                                  + "ask it to behave differently."));
+  }
+
+  const draw = (p, decided) => {
+    const row = el("div", "mem-row");
+    const head = el("div", "thing-head");
+    head.append(el("strong", null, p.target),
+                el("span", "cz-badge", PROPOSAL_WORDS[p.kind] || p.kind));
+    if (p.field) head.append(el("span", "cz-badge", p.field));
+    if (decided) head.append(el("span", "cz-badge" + (p.status === "approved"
+      ? " edited" : ""), p.status));
+    head.append(el("span", "spacer"),
+                el("span", "mem-meta", new Date(p.created * 1000).toLocaleString()));
+    row.append(head);
+    row.append(el("div", "desc", p.reason));
+    row.append(diff(p.before, p.after));
+
+    const note = el("span", "status");
+    const actions = el("div", "mem-meta");
+    if (p.status === "pending") {
+      actions.append(button("btn", "Approve", async () => {
+        if (!await confirmModal({
+          title: "Apply this change?",
+          message: `IRiS suggested this itself. It will take effect immediately, and `
+                 + `"undo" here puts the old value back whenever you want.`,
+          confirmText: "Approve"})) return;
+        try { await send(`proposals/${p.id}/approve`, {}, "POST"); show("self"); }
+        catch (e) { status(note, e.message, true); }
+      }));
+      actions.append(button("btn secondary", "Reject", async () => {
+        await send(`proposals/${p.id}/reject`, {}, "POST");
+        show("self");
+      }));
+    } else if (p.status === "approved") {
+      actions.append(button("ghost", "undo", async () => {
+        await send(`proposals/${p.id}/revert`, {}, "POST");
+        show("self");
+      }));
+    }
+    actions.append(button("ghost", "remove", async () => {
+      await json("proposals/" + p.id, {method: "DELETE"});
+      show("self");
+    }), note);
+    row.append(actions);
+    return row;
+  };
+
+  for (const p of pending) box.append(draw(p, false));
+  if (rest.length) {
+    box.append(el("div", "cz-group", "already decided"));
+    for (const p of rest) box.append(draw(p, true));
+  }
   host.append(box);
 }
 

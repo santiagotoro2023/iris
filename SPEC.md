@@ -2130,3 +2130,77 @@ The Customize tab rendered nothing. `showView` had the hook, but the tab strip h
 own click handler that duplicates `showView`'s body rather than calling it, so the hook
 never ran. Worth recording because the duplication is still there and the next tab
 added will hit it too.
+
+## 56. Phase 8: Knowing What It Is, and Proposing What It Should Be
+
+Two halves, and the second is deliberately smaller than it sounds.
+
+### Self-inspection is generated, never written down
+
+`api/introspect.py`. §17 records the failure this exists to prevent: asked what it was
+doing, IRiS once said *"running at 72% GPU, parsing sensor data from the west wing"*.
+There is no west wing. `system_status` fixed the measured half. This is the structural
+half: what IRiS is made of.
+
+Everything comes from the live registries — `reasoning.TOOLS`, `briefings.WIDGETS`,
+`rules.TRIGGERS`, `registry.TYPES`, `settings.REGISTRY`. A hand-written architecture
+summary is correct on the day it is written and quietly wrong a month later, which is
+worse than having none because it still reads as authoritative. A tool registered
+tomorrow appears in the answer tomorrow, with no edit here, and there is a test that
+fails if that stops being true.
+
+`describe(topic)` filters, because handing an 8B model everything it is made of and
+asking about the memory system means it answers about the cameras.
+
+The second tool is `what_did_i_do`, over the audit log. §3.2 always said the log was
+how "why did you do that" would get a real answer in Phase 8; this is that. It reads a
+record written when the action happened rather than reconstructing one afterwards, and
+action names are turned into something a person would recognise, because `chat.message`
+is a log line and not an answer.
+
+### Self-modification is bounded to its own configuration, on purpose
+
+`api/proposals.py`. IRiS can propose a change to itself. It cannot make one. A
+proposal carries the current value, the suggested one and the reason, and sits in a
+queue under Customize, Self until a person approves it. Anything approved can be undone
+in one press, because the before-value is stored rather than reconstructed, and it is
+**re-read at approval time**: something else may have changed it in between, and
+reverting to a value that stopped being current an hour ago would be its own small
+disaster.
+
+What it may propose: a setting, its persona, a tool's description or trigger words, a
+custom quick command. **Not code.**
+
+That bound is a decision. The spec asks for human-approved diffs with git history and
+rollback, and for configuration this delivers exactly that. Extending it to source
+would mean an 8B model writing Python that runs as root on a box holding every
+conversation, memory and credential, on a repo that is public and a port that may be
+forwarded. "A human approves the diff" is a thin control when the diff is forty lines
+of code at seven in the morning, and it is not a control this codebase has any way to
+make thicker. If code-level self-modification is wanted it should be its own decision
+with its own review, not a side effect of this one. **ASK USER if that is wanted.**
+
+The queue is capped at 25 pending. IRiS refuses to add to a queue nobody has read, and
+says so in those words.
+
+### What testing caught
+
+The first proposal failed on approval: `llm.tool_budget: '7' is not of type 'integer'`.
+The tool takes `value` as a string on purpose, because an 8B model handles one argument
+type far better than a union and will say `"7"` for a number every time; the settings
+service validates against the registered JSON Schema and rightly refuses it. The
+conversion is this side's job, and it happens at propose time so the queued diff shows
+`7` rather than `"7"`. Worth recording that the failure mode was safe: validation
+refused it rather than storing a string in an integer setting.
+
+Also: a hash-only navigation does not reload the page, so a tab sitting on
+`https://localhost:8000/` and sent to `#customize/self` keeps running the JavaScript it
+already had. Not a bug in IRiS, but it wasted a debugging cycle and will waste another.
+
+### Verification of the previous change
+
+The three paths flagged as unverified in §55 were closed before this work started: an
+automation created through the API fired through the scheduler, delivered a
+conversation, and did **not** fire again on the next tick; a timer rang in the browser
+with the modal and the chime; retry replaced the answer rather than appending, leaving
+the stored conversation at one user turn and one assistant turn.

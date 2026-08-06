@@ -646,3 +646,28 @@ button { font: inherit; color: inherit; }
 .transcript-who { font-family: var(--mono); font-size: .68rem; color: var(--orange);
                   flex: none; padding-top: .12rem; }
 .desc.err { color: var(--err); }
+
+/* ------------------------------------------------------ customize: self -- */
+.cz-fact { display: flex; gap: .8rem; padding: .45rem .9rem;
+           border-bottom: 1px solid var(--line); font-size: .85rem; }
+.cz-fact:last-child { border-bottom: 0; }
+.cz-fact-key { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em;
+               text-transform: uppercase; color: var(--dim); flex: none;
+               width: 11rem; padding-top: .15rem; }
+
+/* Before and after side by side. A proposal is only reviewable if the thing it
+   replaces is visible next to it. */
+.cz-diff { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem;
+           margin: .5rem 0; }
+.cz-diff-side { border: 1px solid var(--line); background: #0b0c0e; padding: .5rem; }
+.cz-diff-side.after { border-color: var(--orange); }
+.cz-diff-side .cz-subhead { margin: 0 0 .35rem; }
+.cz-diff pre { margin: 0; font-family: var(--mono); font-size: .74rem;
+               line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+               max-height: 14rem; overflow-y: auto; color: var(--text); }
+
+@media (max-width: 720px) {
+  .cz-diff { grid-template-columns: 1fr; }
+  .cz-fact { flex-direction: column; gap: .15rem; }
+  .cz-fact-key { width: auto; }
+}

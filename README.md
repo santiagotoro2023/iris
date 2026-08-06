@@ -446,6 +446,37 @@ and clears itself, and the message shows which command it carried.
 **Customize > Quick commands** switches them on and off and adds your own: a label, a
 hint and the instruction to prepend. Commands for switched-off features are hidden.
 
+## Asking IRiS about itself
+
+Two tools, both reading facts rather than imagination.
+
+**about_myself** answers what IRiS is made of: its model, its tools, how memory works,
+what a briefing is built from, where things are stored. It is *counted from the live
+registries*, never written down, so a tool added tomorrow appears in the answer
+tomorrow. Ask for a topic to narrow it.
+
+**what_did_i_do** answers from the audit log. "Why did you send that", "what have you
+been doing", "did you back up today" get a record written when the action happened,
+not a reconstruction afterwards.
+
+**Customize > Self** shows the same thing as a page, with what is running right now
+beside it.
+
+## Proposing changes to itself
+
+IRiS can suggest a change to its own configuration. It cannot make one.
+
+Ask it to behave differently and it can queue a proposal: a setting, a line of its
+persona, the wording or trigger words of one of its tools, a custom quick command. The
+proposal sits under **Customize > Self** with the current value beside the suggested
+one and the reason it gave. Nothing happens until you approve it, and anything you
+approve can be undone in one press.
+
+It cannot propose changes to its own code, deliberately. Human approval is a thin
+control when the diff is forty lines of Python running as root on the box that holds
+every conversation, memory and credential. SPEC.md 56 has the full reasoning; if you
+want that, it should be its own decision.
+
 ## Settings
 
 Everything configurable lives at http://localhost:8000/ and is driven by a schema,
