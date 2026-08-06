@@ -92,15 +92,19 @@ and shown exactly once. Ten failed logins lock an account for 15 minutes.
 
 ## Web UI
 
-`http://localhost:8000/` is the full client, not a settings page. Three tabs today:
+`https://localhost:8000/` is the full client, not a settings page.
 
 - **Chat** — conversations with IRiS, including the tool calls it made. History is
   stored server-side per user, so the same conversation opens on any device. The mic
-  button records and transcribes into the composer.
+  button records and transcribes into the composer. Any reply can be retried and any
+  message edited and asked again; the download button top right saves the whole
+  conversation as Markdown.
+- **Conversations** — everything IRiS has been asked, plus *briefing* to run one now.
+- **Memory** — what it remembers, and the encrypted backups.
+- **Devices** and **Integrations** — cameras, microphones, mailboxes, calendars, push.
+- **Customize** — briefings, automations, the tool library, quick commands, persona.
 - **Settings** — every registered setting, rendered from the schema.
 - **Activity** — the audit log (SPEC.md 3.2): what IRiS did, when, and for whom.
-
-A memory tab arrives with Phase 3.
 
 ### Voice
 
@@ -199,22 +203,36 @@ Only the verbatim record expires: whatever IRiS learned from a conversation was
 distilled into a memory when the exchange happened and is kept. Set it to 0 to keep
 everything forever.
 
-Attach several files at once, or paste an image straight in with Ctrl+V. Uploading is
-just the upload; **reading the file happens during the reply**, as a tool with its own
-banner, so a two-minute video does not hold up the message. Uploads show a real
-progress bar, with a cross to cancel one mid-flight. **Send**
-becomes **Stop** while a reply is being written and is blocked while a file is still
-going up. Leaving or deleting a conversation abandons everything that belonged to it:
-the reply being written, the speech reading it out, and any upload in flight.
+Attach several files at once, or paste an image straight in with Ctrl+V. Images,
+documents, video **and audio** (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.opus`, `.flac` and
+friends) are all read. Uploading is just the upload; **reading the file happens during
+the reply**, as a tool with its own banner, so a two-minute video does not hold up the
+message. Uploads show a real progress bar, with a cross to cancel one mid-flight.
+**Send** becomes **Stop** while a reply is being written and is blocked while a file is
+still going up. Leaving or deleting a conversation abandons everything that belonged to
+it: the reply being written, the speech reading it out, and any upload in flight.
+
+**Read once.** The extraction is kept beside the file, so a follow-up question about a
+seven minute video is answered from the transcript rather than costing another seven
+minutes. Replacing the file under the same name re-reads it.
+
+**Speaker labels.** Recordings are diarized with SpeechBrain, on the CPU so it never
+takes VRAM from the language model, and the transcript reads
+`[02:14] Speaker 2: ...`. Switch it off with *Label speakers in recordings*. If it
+cannot run, the transcript still arrives and says why the labels are missing. Speaker
+identity cannot survive chunking, so recordings under fifteen minutes are diarized
+whole and longer ones say that the numbering restarts per part. The clustering
+threshold is `STT_DIARIZE_THRESHOLD`; the default was measured on real recordings, and
+a room, a microphone or a codec may want it moved.
+
+**The transcript, beside the recording.** Any video or audio attachment has a
+*transcript* button: the player, the timestamped lines, and clicking a line seeks to
+it. The line under the playhead is marked as it plays.
 
 **Ingesting a recording.** The Memory tab takes an audio or video file, transcribes
 it, chunks the transcript on sentence boundaries and stores it, then distils any
 durable facts out of it through the same evidenced extractor. Searching afterwards
 ranks the distilled fact above the raw chunk it came from.
-
-> Not yet built: speaker diarization. pyannote's models are gated behind a
-> HuggingFace licence that has to be accepted with an account, so it needs a decision
-> rather than more work.
 
 ## Transit and places
 
@@ -249,27 +267,62 @@ HTTPS.
 ## Speaking first
 
 IRiS can start a conversation rather than only answering, which **Speak first**
-controls.
+controls. Two shapes of that: briefings, which run at a time, and automations, which
+run when something happens.
 
-The daily briefing is built the sober way round: the facts are gathered by calling
-the tools directly, and only the *wording* is left to the model. Asking an 8B model
-to "go and check everything" means it sometimes decides it already knows, and a
-briefing that quietly invents your morning is worse than no briefing. It arrives as a
-new conversation in the chat — as if IRiS had messaged first — and goes out to every
-configured webhook. *briefing* in the Conversations tab runs one on demand.
+### Briefings
 
-It covers, in order: the weather where you are, the commute, your calendar, your mail,
-and a few headlines from the world and your region. The headlines come from a live
-news search and **the sources are attached to the briefing** as an ordinary collapsed
-source list, with links, exactly as a web search in chat looks.
+Under **Customize > Briefings**. A briefing is a name, a schedule and an ordered list
+of **widgets**, each with its own settings and its own sentence budget. There can be as
+many as you have reasons for one; one is the default, and that is what you get from
+*brief me*, from the *Brief me* quick command and from the `briefing` tool. Asking for
+one by name gives that one.
 
-The briefing is written by the server, not the browser, so it does not matter whether
-the page is open: get up at half seven and the seven o'clock briefing is already
-waiting in Conversations.
+Widgets: greeting, weather, news, calendar, mail, commute, this machine, timers and
+alarms, what the cameras saw, and a standing note. Drag to reorder, or use the arrows.
 
-**Quiet hours** wrap midnight properly, so 22:00 to 07:00 means what it says. A
-briefing due inside them waits. If the machine was off at briefing time, the day is
-skipped rather than delivered at lunchtime.
+- **Weather** takes Home, Work, where you are standing, or a place you name.
+- **News** takes World, your region, or a topic, plus preferred outlets: SRF,
+  20 Minuten, Blick, NZZ, Tages-Anzeiger, Watson, SwissInfo, RTS, Le Temps, Reuters,
+  BBC, AP, the Guardian, Al Jazeera, DW, France 24, NYT, the FT, Bloomberg. Chosen
+  outlets are searched first and an open search fills in whatever they did not cover,
+  so a quiet day at one outlet cannot empty the section.
+- **How much to write** is per widget, so the weather gets two sentences and the news
+  four without either crowding the other out.
+
+Schedules are per briefing: every day, weekdays, certain days, once a month, or only
+when asked. The facts are gathered by calling the tools directly and only the *wording*
+is left to the model, because asking an 8B model to "go and check everything" means it
+sometimes decides it already knows. Sources are attached as an ordinary collapsed
+source list, with links.
+
+It is written by the server, so it does not matter whether the page is open: get up at
+half seven and the seven o'clock briefing is already waiting. If the machine was off at
+briefing time it briefs as soon as it is on, once, and says in the log that it is
+catching up.
+
+### Automations
+
+Under **Customize > Automations**. Five things can set one off: mail matching a
+description arrives, the weather turns, an appointment is coming up (optionally with
+the journey to it), a camera saw something, or this machine is unwell. It can tell you
+in the chat, on your phone, through a webhook, or run a briefing instead. Leave the
+message blank and IRiS words it from what happened. **test** shows what it would say
+without sending it.
+
+Each automation remembers what it has already told you about, so a condition that stays
+true does not become a message every thirty seconds.
+
+**Quiet hours** wrap midnight properly, so 22:00 to 07:00 means what it says. Anything
+due inside them waits.
+
+## Timers and alarms
+
+*Timer or alarm* in the quick command menu, or just ask: "remind me in 20 minutes",
+"wake me at 6:30 every weekday". They live in Postgres, so they survive a restart. When
+one goes off the page rings with a chime IRiS generates itself on first start, and it
+arrives on your phone if push is set up. Pending ones sit above the composer and can be
+cancelled there.
 
 ## Backups
 
@@ -358,18 +411,40 @@ The line is part of the tool's declaration:
       activity="Checking the weather {place}", display="lines")
 ```
 
-`display` picks how the result renders: `sources`, `lines`, or `text`. Only relevant
-tools are sent each turn, so a small model is not choosing between fifteen.
+`display` picks how the result renders: `sources`, `lines`, or `text`.
+
+## The tool library
+
+IRiS is not handed every tool on every message. Trigger words settle it first; when
+none match, the tools whose descriptions are closest to what you said are offered
+instead, up to **Tools offered per message** of them alongside the ones it always has.
+Eighteen tools and 16,000 characters of schema made an 8B model fill arguments from
+stale context (SPEC.md 44), and this is what fixed it.
+
+**Customize > Tools** makes that visible. Every tool, grouped, with the instructions
+the model actually receives, the words that pull it in, and what each argument means.
+All of it editable, all of it resettable. Saving an edit warns first that changing what
+a tool tells the model can stop it being chosen or make it be called with the wrong
+values; **Reset to default** undoes it, and needs no confirmation, because making the
+undo hard would be backwards. Argument descriptions can be reworded; their names and
+types cannot, since an argument the model is told to fill but the function does not take
+is a crash rather than a customisation.
+
+Tools can be switched off. A core tool can be too, and you are told what that costs
+rather than being refused.
+
+Every tool banner also records **why** that tool was offered: `matched "rain"`,
+`closest match for this message (0.71)`, `always available`. Open the banner to see it.
 
 ## Quick commands
 
-The lightning button picks a command — *Transit*, *Schedule*, *Weather*, *Check
-mail*, *Look at a camera*, *Find a place*, *Search the web*, *Remember this*. What you
-type is then aimed at that tool. It applies to one message and clears itself, and the
-message shows which command it carried.
+The lightning button picks a command — *Transit*, *Schedule*, *Weather*, *Check mail*,
+*Look at a camera*, *Find a place*, *Search the web*, *Remember this*, *Brief me*,
+*Timer or alarm*. What you type is then aimed at that tool. It applies to one message
+and clears itself, and the message shows which command it carried.
 
-Commands for switched-off features are hidden. Adding one is a dict entry in
-`reasoning.QUICK_COMMANDS`.
+**Customize > Quick commands** switches them on and off and adds your own: a label, a
+hint and the instruction to prepend. Commands for switched-off features are hidden.
 
 ## Settings
 

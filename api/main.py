@@ -21,9 +21,12 @@ from pydantic import BaseModel
 import activity
 import auth
 import backup
+import briefings
 import cameras
 import chat
+import chime
 import devices
+import events
 import files
 import frigate
 import integrations
@@ -33,7 +36,10 @@ import places
 import proactive
 import registry
 import reasoning
+import rules
 import settings
+import timers
+import toolkit
 import voice
 import wake
 
@@ -92,6 +98,8 @@ settings.setting(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The chime is generated before the assets are stamped, so the version covers it.
+    chime.ensure(_static / "alarm.wav")
     global _ASSET_VERSION
     _ASSET_VERSION = _stamp_assets()
     await settings.init()
@@ -99,9 +107,16 @@ async def lifespan(app: FastAPI):
     await activity.init()
     await chat.init()
     await registry.init()
+    await toolkit.load()
+    await briefings.init()
+    await rules.init()
+    await timers.init()
     asyncio.create_task(backup.scheduler())
     asyncio.create_task(memory.compactor())
-    asyncio.create_task(proactive.scheduler())
+    asyncio.create_task(briefings.scheduler())
+    asyncio.create_task(rules.scheduler())
+    asyncio.create_task(timers.scheduler())
+    asyncio.create_task(events.listener())
     yield
 
 
@@ -133,6 +148,11 @@ app.include_router(registry.make_router('device'))
 app.include_router(registry.make_router('integration'))
 app.include_router(places.router)
 app.include_router(proactive.router)
+app.include_router(briefings.router, dependencies=_gate)
+app.include_router(rules.router, dependencies=_gate)
+app.include_router(toolkit.router, dependencies=_gate)
+app.include_router(timers.router)   # its SSE stream authenticates per route
+app.include_router(events.router, dependencies=_gate)
 app.include_router(frigate.router)
 
 
@@ -185,7 +205,7 @@ def _stamp_assets() -> str:
     so there is nothing stale to serve.
     """
     digest = hashlib.md5()
-    for name in ("app.css", "app.js", "logo.svg"):
+    for name in ("app.css", "app.js", "customize.js", "logo.svg"):
         path = _static / name
         if path.exists():
             digest.update(path.read_bytes())
@@ -195,7 +215,7 @@ def _stamp_assets() -> str:
 def _page(name: str) -> HTMLResponse:
     html = (_static / name).read_text()
     # logo.svg is stamped too: the tab favicon is cached hardest of all.
-    for asset in ("app.css", "app.js", "logo.svg"):
+    for asset in ("app.css", "app.js", "customize.js", "logo.svg"):
         html = html.replace(f'"{asset}"', f'"{asset}?v={_ASSET_VERSION}"')
     # The shell itself is never cached, so a new version is always picked up.
     return HTMLResponse(html, headers={"cache-control": "no-store"})

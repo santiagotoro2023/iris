@@ -93,23 +93,64 @@ TRIGGERS: dict[str, tuple[str, ...]] = {
     "system_status": ("how are you", "what are you doing", "busy", "gpu", "vram",
                       "memory", "disk", "temperature", "load", "running",
                       "how do you feel", "yourself"),
+    "briefing": ("brief", "briefing", "my day", "the day", "catch me up",
+                 "what's on today", "rundown", "summary of today"),
+    "set_timer": ("timer", "remind me in", "countdown", "in an hour",
+                  "in ten minutes", "in five minutes", "set a timer"),
+    "set_alarm": ("alarm", "wake me", "wake up", "set an alarm", "at 6", "at 7"),
+    "timers": ("timer", "alarm", "how long left", "cancel the timer",
+               "what timers", "still running"),
+    "camera_events": ("camera", "saw", "noticed", "motion", "detected", "doorbell",
+                      "who came", "anyone at", "delivery", "parcel"),
 }
 
 _tool_vectors: dict[str, list[float]] | None = None
 
 
-async def _relevant(query: str, budget: int) -> set[str]:
+def triggers_for(name: str) -> tuple[str, ...]:
+    """Trigger words, with the user's override applied. The library in Customize can
+    add a word that routes better for how they actually speak."""
+    import toolkit
+    return toolkit.triggers_for(name, TRIGGERS.get(name, ()))
+
+
+def schema_for(name: str) -> dict:
+    """The schema as the model will see it, with any edits from the tool library.
+
+    Instructions are editable, which means they are breakable; the library warns
+    before saving and can reset a tool to what the code declares.
+    """
+    import toolkit
+    spec = TOOLS[name]
+    fn = spec.schema["function"]
+    description = toolkit.description_for(name, fn["description"])
+    parameters = toolkit.parameters_for(name, fn["parameters"])
+    if description == fn["description"] and parameters == fn["parameters"]:
+        return spec.schema
+    return {"type": "function",
+            "function": {"name": name, "description": description,
+                         "parameters": parameters}}
+
+
+async def _relevant(query: str, budget: int) -> dict[str, str]:
     """Rank the optional tools against the turn, so the model is handed a short list
-    it can actually reason about.
+    it can actually reason about. Returns name -> why it was picked.
 
     Eighteen tools and 16,000 characters of schema made an 8B model fill arguments
     from stale context and lose track of roles (SPEC.md 44). Cutting descriptions
     cost precision; choosing which tools to send costs none.
+
+    The reason travels with the choice because when the routing misfires there is
+    otherwise nothing to look at: the banner can say which word pulled a tool in.
     """
     global _tool_vectors
-    optional = [n for n in TOOLS if n not in CORE_TOOLS]
-    chosen = {n for n, words in TRIGGERS.items()
-              if n in TOOLS and any(w in query for w in words)}
+    import toolkit
+    optional = [n for n in TOOLS if n not in CORE_TOOLS and toolkit.enabled(n)]
+    chosen: dict[str, str] = {}
+    for name in optional:
+        hit = next((w for w in triggers_for(name) if w in query), None)
+        if hit:
+            chosen[name] = f'matched "{hit}"'
     # A word match is evidence; similarity is a guess. When the words settle it,
     # padding the list out to a budget only puts a camera in front of a question
     # about the weather.
@@ -117,10 +158,13 @@ async def _relevant(query: str, budget: int) -> set[str]:
         return chosen
     try:
         import memory
-        if _tool_vectors is None:
-            texts = [TOOLS[n].schema["function"]["description"] for n in optional]
-            vectors = await memory.embed(texts)
-            _tool_vectors = dict(zip(optional, vectors))
+        # Embedded for every tool, not just the enabled ones: enabling a tool in the
+        # library must not need a restart to make it rankable again.
+        missing = [n for n in TOOLS if n not in (_tool_vectors or {})]
+        if missing:
+            texts = [TOOLS[n].schema["function"]["description"] for n in missing]
+            _tool_vectors = {**(_tool_vectors or {}),
+                             **dict(zip(missing, await memory.embed(texts)))}
         wanted = (await memory.embed([query]))[0]
 
         def score(name: str) -> float:
@@ -135,11 +179,11 @@ async def _relevant(query: str, budget: int) -> set[str]:
         for name in sorted(optional, key=score, reverse=True):
             if len(chosen) >= budget:
                 break
-            chosen.add(name)
+            chosen[name] = f"closest match for this message ({score(name):.2f})"
     except Exception as e:
         # Never fewer tools because the embedder is down: fall back to all of them.
         print(f"[reasoning] tool selection unavailable: {e}", flush=True)
-        return set(optional)
+        return {n: "offered because tool ranking was unavailable" for n in optional}
     return chosen
 
 
@@ -209,22 +253,42 @@ QUICK_COMMANDS: dict[str, dict] = {
         "directive": "Use find_place. Give names and streets, nearest first.",
         "needs": "location.enabled",
     },
+    "briefing": {
+        "label": "Brief me",
+        "hint": "optional: which briefing",
+        "directive": "Use the briefing tool. If they named a briefing, pass that name; "
+                     "otherwise pass nothing and give them their default. Report what "
+                     "it says, and add nothing that is not in it.",
+    },
+    "timer": {
+        "label": "Timer or alarm",
+        "hint": "e.g. 20 minutes, or 06:30",
+        "directive": "A duration means set_timer, a time of day means set_alarm. "
+                     "Confirm in one short sentence with the time it will go off.",
+    },
 }
 
 
 def quick_commands() -> list[dict]:
-    """Only the ones whose feature is actually switched on."""
+    """The built-in ones whose feature is switched on, plus anything defined in the
+    Customize tab. Both shapes end up identical to the client."""
+    import toolkit
     out = []
     for name, spec in QUICK_COMMANDS.items():
         need = spec.get("needs")
         if need and not settings.get(need):
             continue
-        out.append({"name": name, "label": spec["label"], "hint": spec["hint"]})
+        if not toolkit.command_enabled(name):
+            continue
+        out.append({"name": name, "label": spec["label"], "hint": spec["hint"],
+                    "custom": False})
+    out.extend(toolkit.custom_commands())
     return out
 
 
 def apply_command(name: str, text: str) -> str:
-    spec = QUICK_COMMANDS.get(name)
+    import toolkit
+    spec = QUICK_COMMANDS.get(name) or toolkit.custom_command(name)
     if not spec:
         return text
     return f"{spec['directive']}\n\n{text}"
@@ -455,6 +519,90 @@ async def _look_at_camera(camera: str):
         return "Cameras are switched off."
     out = await cameras.describe(camera)
     return f"{out['camera']}: {out['description']}"
+
+
+@tool("briefing",
+      "Read out a briefing: the user's weather, calendar, mail, commute and news "
+      "gathered into one report. Use for 'brief me', 'what's my day look like', "
+      "'give me the morning briefing'. Naming one gives that briefing; omitting the "
+      "name gives their default.",
+      {"type": "object",
+       "properties": {"name": {"type": "string",
+                               "description": "Which briefing, as they named it. OMIT "
+                                              "for the default one."}}},
+      activity="Putting together the {name} briefing", display="text")
+async def _briefing(name: str = ""):
+    import briefings
+    return await briefings.text_for(name)
+
+
+@tool("set_timer",
+      "Start a countdown: 'remind me in 20 minutes', 'timer for an hour and a half'. "
+      "For a time of day rather than a duration, use set_alarm.",
+      {"type": "object",
+       "properties": {
+           "duration": {"type": "string",
+                        "description": "How long, in their words: '20 minutes', "
+                                       "'1h30m', 'two hours'."},
+           "label": {"type": "string",
+                     "description": "What it is for, e.g. 'the oven'. Optional."}},
+       "required": ["duration"]},
+      activity="Setting a {duration} timer for {label}", display="lines")
+async def _set_timer(duration: str, label: str = ""):
+    import timers
+    return await timers.set_timer_text(duration, label, CURRENT_USER.get())
+
+
+@tool("set_alarm",
+      "Set an alarm for a time of day: 'wake me at 06:30', 'alarm at 7 every "
+      "weekday'. For a countdown from now, use set_timer.",
+      {"type": "object",
+       "properties": {
+           "when": {"type": "string",
+                    "description": "The time, in their words: '06:30', 'tomorrow "
+                                   "7am'."},
+           "label": {"type": "string", "description": "What it is for. Optional."},
+           "repeat": {"type": "string", "enum": ["", "daily", "weekdays", "weekly"],
+                      "description": "OMIT for a one-off."}},
+       "required": ["when"]},
+      activity="Setting an alarm for {when}", display="lines")
+async def _set_alarm(when: str, label: str = "", repeat: str = ""):
+    import timers
+    return await timers.set_alarm_text(when, label, repeat, CURRENT_USER.get())
+
+
+@tool("timers",
+      "What timers and alarms are running, and cancel one. Use for 'what timers do I "
+      "have', 'cancel the oven timer', 'how long left'.",
+      {"type": "object",
+       "properties": {"cancel": {"type": "string",
+                                 "description": "The label or id to cancel. OMIT to "
+                                                "just list them."}}},
+      activity="Checking the timers", display="lines")
+async def _timers(cancel: str = ""):
+    import timers
+    if cancel:
+        return await timers.cancel_text(cancel, CURRENT_USER.get())
+    return await timers.upcoming_text(CURRENT_USER.get())
+
+
+@tool("camera_events",
+      "What the cameras noticed recently: someone at a door, a car arriving, a "
+      "delivery. This is the recorded history, where look_at_camera is the view "
+      "right now.",
+      {"type": "object",
+       "properties": {
+           "hours": {"type": "number",
+                     "description": "How far back to look. Default 12."},
+           "camera": {"type": "string",
+                      "description": "One camera by name. OMIT for all of them."},
+           "objects": {"type": "string",
+                       "description": "What to look for, e.g. 'person,car'. OMIT for "
+                                      "everything."}}},
+      activity="Looking through what the cameras saw", display="lines")
+async def _camera_events(hours: float = 12, camera: str = "", objects: str = ""):
+    import events
+    return await events.describe(hours, camera, objects)
 
 
 @tool("web_search",
@@ -695,14 +843,19 @@ async def stream(messages: list[dict], model: str | None = None,
     # Which tools this turn gets. A tool already used in this conversation stays
     # available, or a follow-up ("and how do I get there?") loses the tool that
     # answered the question before it.
+    import toolkit
     asked = next((m.get("content") or "" for m in reversed(messages)
                   if m.get("role") == "user"), "").lower()
     already = {m.get("tool_name") for m in messages if m.get("role") == "tool"}
-    picked = (CORE_TOOLS | already
-              | await _relevant(asked, settings.get("llm.tool_budget")))
+    why = await _relevant(asked, settings.get("llm.tool_budget"))
+    why.update({n: "always available" for n in CORE_TOOLS})
+    why.update({n: "already used in this conversation" for n in already
+                if n and n not in why})
+    picked = set(why)
 
-    tools = [spec.schema for name, spec in TOOLS.items()
+    tools = [schema_for(name) for name in TOOLS
              if name in picked
+             and toolkit.enabled(name)
              and not (name == "web_search" and policy == "off")
              and not (name in ("remember", "recall") and memory_off)
              and not (name == "look_at_camera"
@@ -767,21 +920,27 @@ async def stream(messages: list[dict], model: str | None = None,
 
             for call in tool_calls:
                 fn = call.get("function", {})
-                yield {"type": "tool_start", "name": fn.get("name", "?"),
-                       "label": announce(fn.get("name", "?"),
-                                         fn.get("arguments")),
+                called = fn.get("name", "?")
+                yield {"type": "tool_start", "name": called,
+                       "label": announce(called, fn.get("arguments")),
+                       "why": why.get(called, "chosen by the model"),
                        "arguments": fn.get("arguments", {})}
                 name, result = await _run_tool(call)
                 spec = TOOLS.get(name)
                 label = announce(name, fn.get("arguments"))
                 # Stored on the message too, so reopening a conversation shows the
-                # same line rather than a bare tool name.
+                # same line rather than a bare tool name. `why` goes with it: when the
+                # routing misfires, the record of what pulled the tool in is the only
+                # thing that makes it diagnosable after the fact.
                 messages.append({"role": "tool", "tool_name": name,
                                  "label": label,
                                  "display": spec.display if spec else "text",
+                                 "why": why.get(name, "chosen by the model"),
+                                 "arguments": fn.get("arguments", {}),
                                  "content": result})
                 yield {"type": "tool", "name": name, "label": label,
                        "display": spec.display if spec else "text",
+                       "why": why.get(name, "chosen by the model"),
                        "content": result}
 
     yield {"type": "error", "detail": f"tool loop exceeded {MAX_TOOL_HOPS} hops"}

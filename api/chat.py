@@ -5,13 +5,15 @@ from phone to desktop mid-sentence (SPEC.md Phase 5).
 """
 import asyncio
 import json
+import re
 import time
 import uuid
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from pydantic import Field as FieldSpec
 
 import activity
 import auth
@@ -121,6 +123,84 @@ async def conversation(cid: str, user: dict = Depends(auth.active_user)):
     if not messages:
         raise HTTPException(404, "no such conversation")
     return {"id": cid, "messages": messages}
+
+
+class Rewind(BaseModel):
+    # How many messages to keep. Retrying drops the last assistant turn and anything
+    # it called; editing drops from the message being rewritten onwards.
+    keep: int = FieldSpec(ge=0)
+
+
+@router.post("/conversations/{cid}/rewind")
+async def rewind(cid: str, body: Rewind, user: dict = Depends(auth.active_user)):
+    """Cut a conversation back to a point, so it can be answered again.
+
+    Retry and edit are the same operation seen from two ends: both drop everything
+    after a chosen message and let the turn run again. Doing it server-side keeps the
+    stored transcript and what the model sees identical, which a client-side splice
+    would not.
+    """
+    messages = await _load(user["id"], cid)
+    if not messages:
+        raise HTTPException(404, "no such conversation")
+    kept = messages[:body.keep]
+    await _save(user["id"], cid, kept)
+    await activity.record("chat.rewind",
+                          f"conversation {cid[:8]}, {len(messages) - len(kept)} "
+                          f"message(s) dropped", user["username"])
+    return {"id": cid, "messages": kept}
+
+
+def as_markdown(title: str, messages: list[dict]) -> str:
+    """A conversation as a document. Tool turns are kept, folded, because half of what
+    IRiS did in a conversation is what it looked up, and an export that hides it
+    reads as though the answers came from nowhere."""
+    out = [f"# {title}", ""]
+    for m in messages:
+        role = m.get("role")
+        if role == "user":
+            out.append("## You")
+            out.append("")
+            out.append(m.get("content", "").strip())
+            for a in m.get("attachments") or []:
+                out.append("")
+                out.append(f"> Attached {a.get('kind', 'file')}: {a.get('name', '')}")
+        elif role == "assistant":
+            if not (m.get("content") or "").strip():
+                continue          # a turn that only called tools has nothing to show
+            out.append("## IRiS")
+            out.append("")
+            out.append(m["content"].strip())
+        elif role == "tool":
+            label = m.get("label") or m.get("tool_name") or "tool"
+            body = (m.get("content") or "").strip()
+            out.append(f"<details><summary>{label}</summary>")
+            out.append("")
+            out.append("```")
+            out.append(body[:4000])
+            out.append("```")
+            out.append("")
+            out.append("</details>")
+        else:
+            continue
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+@router.get("/conversations/{cid}/export")
+async def export(cid: str, user: dict = Depends(auth.active_user)):
+    messages = await _load(user["id"], cid)
+    if not messages:
+        raise HTTPException(404, "no such conversation")
+    meta = await _redis.hget(_index_key(user["id"]), cid)
+    title = (json.loads(meta).get("title") if meta else None) or "Conversation"
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "", title).strip()[:60] or "conversation"
+    await activity.record("chat.export", title, user["username"])
+    return Response(
+        content=as_markdown(title, messages),
+        media_type="text/markdown; charset=utf-8",
+        headers={"content-disposition":
+                 f'attachment; filename="{safe}.md"'})
 
 
 @router.delete("/conversations/{cid}")

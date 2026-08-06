@@ -20,9 +20,13 @@ import reasoning
 import registry
 import settings
 import backup
+import briefings
 import cameras
+import chat
 import files
 import memory
+import rules
+import toolkit
 import voice
 
 # The API now requires a session. These tests exercise inference and settings logic,
@@ -755,12 +759,11 @@ def test_regional_news_is_searched_by_region_not_by_home_address():
     with patch.dict(settings._overrides, {"location.home": "Oetwil am See",
                                           "location.region": "Switzerland"}):
         with patch.object(reasoning, "hits", fake_hits):
-            sections = asyncio.run(proactive.news())
+            out = asyncio.run(briefings._gather_news({"scope": "My region"}))
 
     assert not any("Oetwil" in q for q in asked), asked
     assert any("Switzerland" in q for q in asked), asked
-    assert [s["label"] for s in sections] == ["Headlines from the world",
-                                              "Headlines from Switzerland"]
+    assert out.sources[0]["label"] == "Headlines from Switzerland"
 
 
 def test_a_headline_carries_its_story_into_the_notes():
@@ -774,12 +777,29 @@ def test_a_headline_carries_its_story_into_the_notes():
             {"title": "Older", "url": "https://b", "content": "older story",
              "_at": 1.0}]
     with patch.object(reasoning, "hits", lambda *a, **k: hits):
-        section = asyncio.run(proactive._section("the world", ["q1", "q2"]))
+        out = asyncio.run(briefings._gather_news({"scope": "World", "stories": 4}))
 
-    assert "froze the accounts over debt" in section["titles"][0]
-    # Deduped by URL across both queries, and newest first.
-    assert len(section["titles"]) == 2
-    assert section["titles"][1].startswith("Older")
+    assert "froze the accounts over debt" in out.notes
+    # Deduped by URL across every query, and newest first.
+    assert out.notes.count("\n- ") + 1 == 2, out.notes
+    assert out.notes.index("Accounts frozen") < out.notes.index("Older")
+
+
+def test_a_chosen_source_that_published_nothing_does_not_empty_the_section():
+    """Restricting to srf.ch on a quiet day used to leave the section blank, which
+    reads as "no news today" rather than "that outlet had nothing"."""
+    import asyncio
+
+    def fake_hits(query, *a, **k):
+        if query.startswith("site:"):
+            return []
+        return [{"title": "Open result", "url": "https://o", "content": "body",
+                 "_at": 1.0}]
+
+    with patch.object(reasoning, "hits", fake_hits):
+        out = asyncio.run(briefings._gather_news(
+            {"scope": "World", "sources": "SRF", "stories": 4}))
+    assert "Open result" in out.notes
 
 
 def test_a_video_that_cannot_be_transcribed_says_so_out_loud():
@@ -791,16 +811,173 @@ def test_a_video_that_cannot_be_transcribed_says_so_out_loud():
     async def no_frames(*a, **k):
         raise RuntimeError("no ffmpeg here")
 
-    async def no_speech(path, seconds):
-        return [], "the audio could not be transcribed (timeout)"
+    async def no_speech(path, seconds, diarize=False):
+        return [], "the audio could not be transcribed (timeout)", "none"
 
-    with patch.object(files, "transcribe_video", no_speech), \
+    with patch.object(files, "transcribe_media", no_speech), \
          patch.object(files, "_run", no_frames), \
+         patch.object(files, "_read_cache", lambda p: None), \
+         patch.object(files, "_write_cache", lambda p, d: None), \
+         patch.object(files, "_probe_kind", lambda p: _resolved("video")), \
+         patch.object(files, "_duration", lambda p: _resolved(12.0)), \
          patch.dict(settings._overrides, {"vision.video_frames": 2}):
-        out = asyncio.run(files.describe_video(Path("/nope.mp4")))
+        out = asyncio.run(files.read_recording(Path("/nope.mp4")))
 
     assert "No transcript" in out and "could not be transcribed" in out
     assert "Do not guess" in out
+
+
+async def _resolved(value):
+    return value
+
+
+def test_a_briefing_section_carries_its_own_sentence_budget():
+    """A flat wall of notes made the model drop the weather on its way to the news,
+    so each section states its own budget and the model is told to respect it."""
+    import asyncio
+
+    async def two_lines(config):
+        return briefings.Gathered(notes="Weather in Nowhere:\n- now: 9C")
+
+    with patch.dict(briefings.WIDGETS,
+                    {"weather": briefings.Widget(
+                        name="weather", label="Weather", description="",
+                        gather=two_lines, default_sentences=2)}):
+        sections, _ = asyncio.run(briefings.gather(
+            {"widgets": [{"id": "w1", "type": "weather", "sentences": 3,
+                          "config": {}}]}))
+    assert sections[0].startswith("SECTION 1 - Weather (write 3 sentences)")
+    assert "Weather in Nowhere" in sections[0]
+
+
+def test_a_widget_with_nothing_to_say_is_dropped_not_apologised_for():
+    """No mailbox configured is not "no mail today"; the section simply is not
+    there, and the rules forbid mentioning a subject that is absent."""
+    import asyncio
+
+    async def silent(config):
+        return briefings.Gathered(notes="")
+
+    with patch.dict(briefings.WIDGETS,
+                    {"mail": briefings.Widget(name="mail", label="Mail",
+                                              description="", gather=silent)}):
+        sections, _ = asyncio.run(briefings.gather(
+            {"widgets": [{"id": "w1", "type": "mail", "config": {}}]}))
+    assert sections == []
+
+
+def test_recurrence_decides_which_days_a_briefing_is_due():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/Zurich")
+
+    def at(day, hour):
+        return datetime(2026, 8, day, hour, 0, tzinfo=tz)
+
+    weekday = {"schedule": {"enabled": True, "at": "07:00",
+                            "recurrence": "weekdays"}}
+    assert briefings.due_now(weekday, at(6, 8))          # Thursday, past 07:00
+    assert not briefings.due_now(weekday, at(6, 6))      # before it is due
+    assert not briefings.due_now(weekday, at(8, 8))      # Saturday
+
+    weekly = {"schedule": {"enabled": True, "at": "08:00", "recurrence": "weekly",
+                           "days": [0]}}
+    assert briefings.due_now(weekly, at(10, 9))          # Monday
+    assert not briefings.due_now(weekly, at(11, 9))      # Tuesday
+
+    monthly = {"schedule": {"enabled": True, "at": "09:00", "recurrence": "monthly",
+                            "day_of_month": 6}}
+    assert briefings.due_now(monthly, at(6, 10))
+    assert not briefings.due_now(monthly, at(7, 10))
+
+    assert not briefings.due_now({"schedule": {"enabled": False}}, at(6, 10))
+
+
+def test_one_delivery_per_period_whatever_the_period_is():
+    """The loop ticks every minute and deliberately fires on "past due" so a machine
+    that was asleep at 07:00 still briefs. The period key is what stops that becoming
+    a briefing a minute."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/Zurich")
+    daily = {"schedule": {"recurrence": "daily"}}
+    weekly = {"schedule": {"recurrence": "weekly"}}
+    monthly = {"schedule": {"recurrence": "monthly"}}
+    morning = datetime(2026, 8, 6, 7, 0, tzinfo=tz)
+    evening = datetime(2026, 8, 6, 23, 0, tzinfo=tz)
+    next_day = datetime(2026, 8, 7, 7, 0, tzinfo=tz)
+
+    assert briefings.period_key(daily, morning) == briefings.period_key(daily, evening)
+    assert briefings.period_key(daily, morning) != briefings.period_key(daily, next_day)
+    # Same ISO week, so a weekly briefing does not go out twice.
+    assert briefings.period_key(weekly, morning) == briefings.period_key(weekly, next_day)
+    assert briefings.period_key(monthly, morning) == briefings.period_key(monthly, next_day)
+
+
+def test_a_rule_does_not_fire_twice_on_the_same_thing():
+    """A trigger is a check, not an event queue. Without the key it fires on every
+    poll and IRiS says the same thing every thirty seconds until it is switched off."""
+    import asyncio
+    fired = rules.Fired(facts="mail from the bank", key="mail|bank|statement")
+    rule = {"id": 1, "name": "bank", "trigger": "mail_arrives",
+            "state": {"seen": ["mail|bank|statement"]}, "action": {}}
+
+    async def always(_):
+        return fired
+
+    delivered = []
+    with patch.dict(rules.TRIGGERS,
+                    {"mail_arrives": rules.Trigger(
+                        name="mail_arrives", label="Mail", description="",
+                        check=always)}), \
+         patch.object(rules, "fire", lambda *a: delivered.append(a)):
+        asyncio.run(rules._tick(rule))
+    assert delivered == []
+
+
+def test_tool_selection_records_why_each_tool_was_offered():
+    """When the routing misfires there is otherwise nothing to look at. The banner
+    can say which word pulled a tool in."""
+    import asyncio
+    picked = asyncio.run(reasoning._relevant("is it going to rain today", 5))
+    assert "weather" in picked
+    assert "rain" in picked["weather"], picked["weather"]
+
+
+def test_an_edited_tool_description_reaches_the_model():
+    with patch.dict(toolkit._prefs,
+                    {"weather": {"enabled": True, "description": "My own wording",
+                                 "triggers": "", "parameters": {}}}):
+        schema = reasoning.schema_for("weather")
+    assert schema["function"]["description"] == "My own wording"
+    # And the declaration is untouched, so a reset genuinely restores it.
+    assert reasoning.TOOLS["weather"].schema["function"]["description"] != "My own wording"
+
+
+def test_a_disabled_tool_is_never_offered():
+    import asyncio
+    with patch.dict(toolkit._prefs,
+                    {"weather": {"enabled": False, "description": "", "triggers": "",
+                                 "parameters": {}}}):
+        picked = asyncio.run(reasoning._relevant("is it going to rain today", 5))
+    assert "weather" not in picked
+
+
+def test_a_conversation_exports_as_readable_markdown():
+    text = chat.as_markdown("Morning", [
+        {"role": "user", "content": "what is on today?"},
+        {"role": "tool", "tool_name": "calendar", "label": "Checking the calendar",
+         "content": "- today 09:00: standup"},
+        {"role": "assistant", "content": "One thing: standup at nine."},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+    ])
+    assert "# Morning" in text
+    assert "## You" in text and "## IRiS" in text
+    # The tool turn is kept but folded: half of what IRiS did is what it looked up.
+    assert "<details><summary>Checking the calendar</summary>" in text
+    # An assistant turn that only called a tool has nothing to show.
+    assert text.count("## IRiS") == 1
+
 
 
 def test_secret_fields_never_reach_a_client():

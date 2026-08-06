@@ -50,19 +50,30 @@
     <button class="tab" role="tab" aria-selected="false" data-view="memory">Memory</button>
     <button class="tab" role="tab" aria-selected="false" data-view="devices">Devices</button>
     <button class="tab" role="tab" aria-selected="false" data-view="integrations">Integrations</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="customize">Customize</button>
     <button class="tab" role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button class="tab" role="tab" aria-selected="false" data-view="activity">Activity</button>
   </nav>
 
   <section class="view active" id="view-chat" role="tabpanel">
     <div class="chat-main">
+      <button class="iconbtn chat-export" id="chat-export" type="button" hidden
+              title="Download this conversation as Markdown"
+              aria-label="Download this conversation">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/>
+        </svg>
+      </button>
+      <div class="timer-strip" id="timer-strip" hidden></div>
       <div class="chat-log" id="chat-log"></div>
       <div id="attach-bar"></div>
       <div class="cmd-chip" id="quick-chip" hidden></div>
+      <div class="composer-note" id="fix-warning" hidden></div>
       <div class="composer-note" id="composer-note" hidden></div>
       <div class="composer">
         <input type="file" id="file-input" hidden multiple
-               accept="image/*,video/*,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
+               accept="image/*,video/*,audio/*,.mp3,.m4a,.wav,.ogg,.oga,.opus,.flac,.aac,.aiff,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.log,.py,.js,.ts,.sh,.sql,.html,.css,.xml,.toml">
         <button class="mic" id="attach" type="button" aria-label="Attach a file"
                 title="Attach an image or document">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
@@ -171,6 +182,13 @@
     </div>
   </section>
 
+  <section class="view" id="view-customize" role="tabpanel">
+    <div class="cz-shell">
+      <nav class="cz-rail" id="cz-rail" aria-label="Customize sections"></nav>
+      <div class="cz-pane" id="cz-pane"></div>
+    </div>
+  </section>
+
   <section class="view" id="view-settings" role="tabpanel">
     <div class="panel" id="password-panel" hidden style="margin-bottom:1.1rem">
       <h2>Change password</h2>
@@ -252,6 +270,9 @@ document.querySelectorAll(".tab").forEach(tab => {
     if (tab.dataset.view === "memory") { loadMemories(); loadBackups(); }
     if (tab.dataset.view === "devices") loadThings("device");
     if (tab.dataset.view === "integrations") loadThings("integration");
+    // Customize lives in its own file and renders on first sight, so nothing it
+    // needs is fetched by somebody who never opens the tab.
+    if (tab.dataset.view === "customize") window.IRiS.openCustomize?.();
   });
 });
 
@@ -439,6 +460,9 @@ function filterSettings() {
 function renderSettings() {
   const groups = {};
   for (const [key, spec] of Object.entries(SCHEMA)) {
+    // Persona lives under Customize now. Rendering it in both places would be two
+    // controls writing one value, which drift the moment either is edited.
+    if (key.startsWith("persona.")) continue;
     const g = key.includes(".") ? key.split(".")[0] : "general";
     (groups[g] ||= []).push([key, spec]);
   }
@@ -678,13 +702,16 @@ function toolActivity(label) {
   return b;
 }
 
-function toolResult(label, content, display) {
+function toolResult(label, content, display, why) {
   const box = document.createElement("details");
   box.className = "tool-result";
   const head = document.createElement("summary");
   head.append(el("span", "tool-tick", "\u2713"), el("span", null, label || "Done"));
   box.append(head);
   const body = el("div", "tool-detail");
+  // Diagnostic, not the headline: when the routing misfires, this is the only thing
+  // that says which word pulled the wrong tool in.
+  if (why) body.append(el("div", "tool-why", "chosen because it " + why));
   if (display === "sources") {
     const sources = parseSources(content);
     for (const s of sources) {
@@ -749,6 +776,63 @@ function searchResult(query, content) {
   return box;
 }
 
+/* A recording, its transcript, and the two wired together: clicking a line seeks the
+   player, and the line under the playhead is marked as it goes. */
+function transcriptView(name, data) {
+  const box = el("div", "transcript");
+  const player = document.createElement(data.kind === "audio" ? "audio" : "video");
+  player.controls = true;
+  player.preload = "metadata";
+  player.src = "files/media/" + encodeURIComponent(name);
+  player.className = "transcript-player";
+  box.append(player);
+
+  if (data.speakers === "per-part") {
+    box.append(el("div", "desc", "This was transcribed in parts, so the speaker "
+                                 + "numbering restarts in each part."));
+  }
+  if (data.failure) box.append(el("div", "desc err", data.failure));
+
+  const lines = el("div", "transcript-lines");
+  const nodes = (data.segments || []).map(s => {
+    const row = el("button", "transcript-line");
+    row.type = "button";
+    row.append(el("span", "transcript-at",
+                  `${String(Math.floor(s.start / 60)).padStart(2, "0")}:`
+                  + String(Math.floor(s.start % 60)).padStart(2, "0")));
+    if (s.speaker) row.append(el("span", "transcript-who", s.speaker));
+    row.append(el("span", null, s.text));
+    row.addEventListener("click", () => { player.currentTime = s.start; player.play(); });
+    lines.append(row);
+    return {row, start: s.start, end: s.end};
+  });
+  if (!nodes.length) lines.append(el("div", "desc", "No speech in this recording."));
+  box.append(lines);
+
+  let active = null;
+  player.addEventListener("timeupdate", () => {
+    const t = player.currentTime;
+    const now = nodes.find(n => t >= n.start && t < n.end);
+    if (now === active) return;
+    active?.row.classList.remove("on");
+    now?.row.classList.add("on");
+    active = now;
+  });
+
+  if ((data.scenery || []).length) {
+    const seen = document.createElement("details");
+    seen.className = "tool-result";
+    const head = document.createElement("summary");
+    head.append(el("span", "chev-sm"), el("span", null, "what the camera showed"));
+    seen.append(head);
+    const body = el("div", "tool-detail");
+    for (const s of data.scenery) body.append(el("div", "tool-lineitem", s.text));
+    seen.append(body);
+    box.append(seen);
+  }
+  return box;
+}
+
 function attachmentBlock(a) {
   // Nothing to fold out until it has been read, and reading it is a tool call whose
   // own banner carries the result.
@@ -757,6 +841,7 @@ function attachmentBlock(a) {
     line.append(el("span", null, `${a.kind}: ${a.name}`));
     if (a.bytes) line.append(el("span", "chip-size",
                                 ` · ${(a.bytes / 2 ** 20).toFixed(1)} MB`));
+    if (a.kind === "video" || a.kind === "audio") line.append(transcriptToggle(a));
     return line;
   }
   const box = document.createElement("details");
@@ -764,7 +849,40 @@ function attachmentBlock(a) {
   const summary = document.createElement("summary");
   summary.append(el("span", "chev-sm"), el("span", null, `${a.kind}: ${a.name}`));
   box.append(summary, el("div", "src-snip", a.text));
+  if (a.kind === "video" || a.kind === "audio") box.append(transcriptToggle(a));
   return box;
+}
+
+/* Lazy: the transcript is only fetched when somebody asks to see it, which keeps a
+   conversation full of videos from firing a request per attachment on every repaint. */
+function transcriptToggle(a) {
+  const wrap = el("div", "transcript-wrap");
+  const open = el("button", "msg-act", "transcript");
+  open.type = "button";
+  const host = el("div");
+  host.hidden = true;
+  open.addEventListener("click", async () => {
+    if (host.childElementCount) {
+      host.hidden = !host.hidden;
+      return;
+    }
+    open.disabled = true;
+    try {
+      host.append(transcriptView(a.name,
+                                 await json("files/transcript/" + encodeURIComponent(a.name))));
+      host.hidden = false;
+    } catch (e) {
+      // 404 here means "not read yet", which is a different thing from an error and
+      // should not look like one.
+      host.append(el("div", "desc", /404|not been read/i.test(e.message)
+        ? "Not read yet. Ask about it and IRiS will read it."
+        : e.message));
+      host.hidden = false;
+    }
+    open.disabled = false;
+  });
+  wrap.append(open, host);
+  return wrap;
 }
 
 /* Shown under a sent message so it is obvious afterwards what context it carried. */
@@ -904,13 +1022,69 @@ function speechPipeline(btn) {
   return self;
 }
 
+/* Cut the conversation back to `keep` messages and answer again. Retry and edit are
+   the same operation from two ends, so they are one function. */
+async function rewindAndSend(keep, text, attachments, command) {
+  if (BUSY || !CONV) return;
+  const data = await send(`chat/conversations/${CONV}/rewind`, {keep}, "POST");
+  paintChat(data.messages);
+  await runTurn({text, attachments: attachments || [], command: command || null});
+  loadConversations();
+}
+
+function retryControl(index, messages) {
+  // Everything from the user turn that produced this reply onwards is dropped, so a
+  // retry re-runs the same question rather than appending to a dead end.
+  let at = index;
+  while (at >= 0 && messages[at].role !== "user") at--;
+  if (at < 0) return null;
+  const asked = messages[at];
+  const b = el("button", "msg-act", "retry");
+  b.type = "button";
+  b.title = "Answer that again";
+  b.addEventListener("click", () => rewindAndSend(
+    at, asked.content, asked.attachments, asked.command));
+  return b;
+}
+
+function editControl(index, messages, node) {
+  const b = el("button", "msg-act", "edit");
+  b.type = "button";
+  b.title = "Change this message and ask again";
+  b.addEventListener("click", () => {
+    const original = messages[index].content || "";
+    const area = el("textarea", "input multiline");
+    area.rows = Math.min(10, original.split("\n").length + 1);
+    area.value = original;
+    const actions = el("div", "thing-actions");
+    const save = el("button", "btn", "Send again");
+    save.type = "button";
+    save.addEventListener("click", () => rewindAndSend(
+      index, area.value.trim(), messages[index].attachments,
+      messages[index].command));
+    const cancel = el("button", "btn secondary", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => paintChat(messages));
+    actions.append(save, cancel);
+    node.body.textContent = "";
+    node.body.append(area, actions);
+    area.focus();
+  });
+  return b;
+}
+
 function paintChat(messages) {
   const log = $("#chat-log");
   log.textContent = "";
   let lastCalls = [];        // a stored tool turn does not carry its own arguments
-  for (const m of messages) {
+  const lastAssistant = messages.map(m => m.role).lastIndexOf("assistant");
+  messages.forEach((m, index) => {
     if (m.role === "user") {
-      log.append(bubble("user", m.content, m.attachments, m.command));
+      const node = bubble("user", m.content, m.attachments, m.command);
+      const acts = el("div", "msg-acts");
+      acts.append(editControl(index, messages, node));
+      node.append(acts);
+      log.append(node);
     } else if (m.role === "tool") {
       const b = el("div", "msg tool");
       // Conversations from before tools carried a label fall back to the call itself.
@@ -919,13 +1093,24 @@ function paintChat(messages) {
         ? `Searching the web for "${call.function.arguments?.query ?? ""}"`
         : `Ran ${m.tool_name}`);
       b.append(toolResult(label, m.content,
-                          m.display || (m.tool_name === "web_search" ? "sources" : "text")));
+                          m.display || (m.tool_name === "web_search" ? "sources" : "text"),
+                          m.why));
       log.append(b);
     } else if (m.role === "assistant") {
       lastCalls = m.tool_calls || [];
-      if ((m.content || "").trim()) log.append(bubble("assistant", m.content));
+      if ((m.content || "").trim()) {
+        const node = bubble("assistant", m.content);
+        if (index === lastAssistant) {
+          const acts = el("div", "msg-acts");
+          const retry = retryControl(index, messages);
+          if (retry) acts.append(retry);
+          node.append(acts);
+        }
+        log.append(node);
+      }
     }
-  }
+  });
+  updateExportButton();
   log.scrollTop = log.scrollHeight;
 }
 
@@ -935,11 +1120,24 @@ async function sendMessage() {
   const text = box.value.trim();
   if ((!text && !ATTACHMENTS.length) || BUSY || UPLOADS.size) return;
   const sending = ATTACHMENTS.slice();
+  box.value = "";
+  box.style.height = "auto";
+  const command = COMMAND?.name;
+  ATTACHMENTS = [];
+  renderAttachBar();
+  setCommand(null);            // one turn, then back to ordinary chat
+  await runTurn({text, attachments: sending, command});
+}
+
+/* The streaming turn itself, separated from the composer so retry and edit can run
+   one without pretending to type into the box. */
+async function runTurn({text, attachments = [], command = null}) {
+  if (BUSY) return;
+  const box = $("#composer");
+  const sending = attachments;
   BUSY = true;
   replyAbort = new AbortController();
   sendButtonState();
-  box.value = "";
-  box.style.height = "auto";
 
   // A fix taken now, so "the next bus" starts from here rather than from wherever
   // the page was opened. GPS can take a few seconds, so wait properly for it; the
@@ -949,7 +1147,7 @@ async function sendMessage() {
 
   const log = $("#chat-log");
   const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-  log.append(bubble("user", text, sending, COMMAND?.name));
+  log.append(bubble("user", text, sending, command));
 
   const live = bubble("assistant", "");
   const spinner = el("span", "thinking");
@@ -993,7 +1191,7 @@ async function sendMessage() {
       target.className = "msg tool";
       target.textContent = "";
       target.append(toolResult(ev.label || target.dataset?.label, ev.content,
-                               ev.display));
+                               ev.display, ev.why));
       if (!pending) log.insertBefore(target, live);
       log.scrollTop = log.scrollHeight;
     } else if (ev.type === "done") {
@@ -1008,14 +1206,10 @@ async function sendMessage() {
     const r = await api("chat/stream", {
       method: "POST", signal: replyAbort.signal,
       headers: {"content-type": "application/json"},
-      body: JSON.stringify({content: text, conversation_id: CONV,
-                            command: COMMAND?.name,
-                            attachments: ATTACHMENTS.length ? ATTACHMENTS : undefined}),
+      body: JSON.stringify({content: text, conversation_id: CONV, command,
+                            attachments: sending.length ? sending : undefined}),
     });
     if (!r.ok || !r.body) throw new Error(`stream failed (${r.status})`);
-    ATTACHMENTS = [];
-    renderAttachBar();
-    setCommand(null);          // one turn, then back to ordinary chat
 
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -1050,6 +1244,114 @@ async function sendMessage() {
   }
 }
 
+/* --------------------------------------------------------------- export -- */
+
+function updateExportButton() {
+  $("#chat-export").hidden = !CONV;
+}
+
+async function exportConversation(id) {
+  const r = await api(`chat/conversations/${id}/export`);
+  if (!r.ok) { note("that conversation could not be exported", true); return; }
+  // The server names the file; taking it from the header keeps the conversation's
+  // own title rather than inventing one from the id.
+  const disposition = r.headers.get("content-disposition") || "";
+  const named = /filename="([^"]+)"/.exec(disposition);
+  const url = URL.createObjectURL(await r.blob());
+  const a = el("a");
+  a.href = url;
+  a.download = named ? named[1] : "conversation.md";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+$("#chat-export").addEventListener("click", () => CONV && exportConversation(CONV));
+
+/* ------------------------------------------------------- timers & alarms -- */
+
+let alarmAudio = null;
+
+function stopAlarm() {
+  if (!alarmAudio) return;
+  alarmAudio.pause();
+  alarmAudio = null;
+}
+
+function ringing(row) {
+  let blocked = "";
+  try {
+    alarmAudio = new Audio("alarm.wav");
+    alarmAudio.loop = true;
+    alarmAudio.play().catch(e => { blocked = e.name || "blocked"; ring.append(
+      el("p", "desc", "The browser would not play the sound until you interact with "
+                      + "the page. It is on your phone if push is set up.")); });
+  } catch (e) {
+    blocked = String(e);
+  }
+
+  const back = el("div", "modal-back");
+  const ring = el("div", "modal");
+  const what = row.label || (row.kind === "alarm" ? "Alarm" : "Timer");
+  ring.append(el("h3", null, what), el("p", null, row.due_text || ""));
+  const actions = el("div", "thing-actions");
+  const close = () => {
+    stopAlarm();
+    back.remove();
+    document.removeEventListener("keydown", esc);
+  };
+  function esc(e) { if (e.key === "Escape") close(); }
+  const stop = el("button", "btn", "Stop");
+  stop.type = "button";
+  stop.addEventListener("click", () => { close(); loadTimers(); });
+  const snooze = el("button", "btn secondary", "Snooze");
+  snooze.type = "button";
+  snooze.addEventListener("click", async () => {
+    close();
+    try { await send(`timers/${row.id}/snooze`, {}, "POST"); } catch { /* gone */ }
+    loadTimers();
+  });
+  actions.append(stop, snooze);
+  ring.append(actions);
+  back.append(ring);
+  document.addEventListener("keydown", esc);
+  document.body.append(back);
+  stop.focus();
+}
+
+async function loadTimers() {
+  const strip = $("#timer-strip");
+  try {
+    const {timers} = await json("timers");
+    strip.textContent = "";
+    strip.hidden = !timers.length;
+    for (const t of timers) {
+      const chip = el("span", "chip");
+      chip.append(el("span", "chip-name",
+                     `${t.label || t.kind} · ${t.due_text}`));
+      const x = el("button", "chip-x", "✕");
+      x.type = "button";
+      x.title = "Cancel";
+      x.addEventListener("click", async () => {
+        await api("timers/" + t.id, {method: "DELETE"});
+        loadTimers();
+      });
+      chip.append(x);
+      strip.append(chip);
+    }
+  } catch {
+    strip.hidden = true;      // not logged in yet, or timers are unavailable
+  }
+}
+
+function listenForTimers() {
+  const es = new EventSource("timers/stream");
+  es.onmessage = e => { ringing(JSON.parse(e.data)); loadTimers(); };
+  // No onerror handler that closes it: EventSource reconnects on its own, and a
+  // timer stream that gives up after one network blip is a timer that does not go off.
+}
+
 /* ------------------------------------------------------------- location -- */
 /* The server cannot ask the browser where it is, so the browser volunteers: on load
    and before a message, throttled. Without this the stored fix is wherever you were
@@ -1069,12 +1371,34 @@ function refreshLocation({force = false} = {}) {
                                        longitude: pos.coords.longitude,
                                        accuracy: pos.coords.accuracy || 0}, "POST");
       } catch { /* a stale fix beats no reply */ }
+      checkFixAge();
       resolve();
-    }, () => resolve(),
+    }, () => { checkFixAge(); resolve(); },
        // No cached position at all: a stale one is exactly what makes the nearest
        // stop wrong, and that is the thing being asked about.
        {enableHighAccuracy: true, timeout: 9000, maximumAge: 0});
   });
+}
+
+/* The server records when the last fix arrived, and everything location-dependent
+   quietly uses it however old it is. Said out loud here: an hours-old fix is a
+   different town by the afternoon, and a wrong nearest stop is otherwise a mystery. */
+function checkFixAge() {
+  const at = Number(VALUES["location.fixed_at"] || 0);
+  const limit = Number(VALUES["location.max_age_minutes"] || 10) * 60;
+  const box = $("#fix-warning");
+  if (!box) return;
+  if (!VALUES["location.auto"] || !at) { box.hidden = true; return; }
+  const age = Date.now() / 1000 - at;
+  box.hidden = age <= limit;
+  if (box.hidden) return;
+  box.textContent = "";
+  box.append(el("span", null,
+                `Your position was last fixed ${Math.round(age / 60)} minutes ago.`));
+  const again = el("button", "msg-act", "refresh");
+  again.type = "button";
+  again.addEventListener("click", () => refreshLocation({force: true}));
+  box.append(again);
 }
 
 /* --------------------------------------------------------- quick commands -- */
@@ -1186,6 +1510,9 @@ function showView(name) {
     t.setAttribute("aria-selected", String(t.dataset.view === name)));
   document.querySelectorAll(".view").forEach(v =>
     v.classList.toggle("active", v.id === "view-" + name));
+  // Customize lives in its own file and renders on first sight, so nothing it needs
+  // is fetched by someone who never opens it.
+  if (name === "customize") window.IRiS.openCustomize?.();
 }
 
 async function openConversation(id, {focusChat = false} = {}) {
@@ -2004,6 +2331,12 @@ async function loadConversations({selectLatest = false} = {}) {
                          "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1";
     open.addEventListener("click", () => openConversation(c.id, {focusChat: true}));
 
+    const save = el("button", "conv-del", "⤓");
+    save.type = "button";
+    save.title = "Download as Markdown";
+    save.setAttribute("aria-label", `Download conversation: ${c.title}`);
+    save.addEventListener("click", e => { e.stopPropagation(); exportConversation(c.id); });
+
     const del = el("button", "conv-del", "✕");
     del.type = "button";
     del.title = "Delete conversation";
@@ -2018,7 +2351,7 @@ async function loadConversations({selectLatest = false} = {}) {
       loadConversations();
     });
 
-    item.append(open, del);
+    item.append(open, save, del);
     list.append(item);
   }
 }
@@ -2091,6 +2424,7 @@ function listen() {
     }
     refreshHud();
     syncHandsFree();
+    checkFixAge();
   };
 }
 
@@ -2111,8 +2445,14 @@ function listen() {
   syncHandsFree();
   json("commands").then(d => { COMMANDS = d.commands; }).catch(() => {});
   refreshLocation({force: true});
+  loadTimers();
+  listenForTimers();
+  checkFixAge();
   $("#composer").focus();
 })();
 </script>
+<!-- After the inline script: it defines showView, which customize.js is reached
+     through, and it registers window.IRiS.openCustomize for it to call. -->
+<script src="customize.js"></script>
 </body>
 </html>

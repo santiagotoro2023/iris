@@ -215,6 +215,9 @@ wait_for_ollama() {
 wait_for_voice() {
   local i stt=0 tts=0
   log "Waiting for the speech and voice models (~5 GB on first run)..."
+  # The speaker-labelling model (SpeechBrain ECAPA, ~80 MB) is fetched the first time
+  # a recording is transcribed, into the same ./data/whisper volume, so it is not
+  # waited on here and a purge takes it with everything else.
   for i in $(seq 1 180); do
     if [ "$stt" -eq 0 ] && curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
       stt=1

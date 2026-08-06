@@ -1982,3 +1982,151 @@ model reads, rather than logged where only I would see it.
 
 Verified on the file that failed: 66 timestamped segments across the full seven
 minutes, where before there were none.
+
+## 55. Customize: Briefings Built From Widgets, and the Tool Library Made Visible
+
+Santiago: *"7 with it being a new tab called customize where we can add more stuff
+later, in this customize tab there should be a drag and drop modal where one can add
+briefing 'widgets'. Like a widget called weather where in the widget i can set weather
+where (like say give me the weather at my home adress, at work or some other custom
+location), a widget for news like Global News Swiss news and a way to chose preferred
+news provider for swiss news with some of the most well known sources (SRF, 20minuten,
+blick etc.) ... theres a menu point called 'Briefings' that when clicked brings up a
+list of Briefings with names, with a default briefing and a way to add and name more
+briefings with different widgets and settings and i can set the standard briefing it
+serves for the briefing task or when i ask just for a briefing or if i ask for a
+specific briefing it gives that. also a way to tell it how many sentences to write
+widget-specific with sensible default values."*
+
+And later: *"add tools to customization so i can see the instructions ... with the user
+being able to select what tools can be used and as we designed it before its a tool
+library that the model knows about and pulls from where needed"*, then: *"the user can
+select one and see what the tool actually does like what instructions are in it and if
+wanted change them (though it should be noted when changes are made when trying to save
+a modal pops up that this might break the tool and also a way to reset the individual
+tools to their default values just to make sure users cant compeltely break stuff with
+no way back"*.
+
+Answers to the questions asked before starting: **SpeechBrain**, not pyannote.
+**Each briefing has its own schedule**, with "Default Briefing" at 07:00 daily and
+recurrence covering weekdays, certain days, once a month and never. **Warm chime.**
+**Quick commands and the persona move into Customize.**
+
+### A briefing is a list of widgets
+
+`api/briefings.py`. A briefing is a name, a schedule, some options, and an ordered list
+of widgets, each with its own settings and its own sentence budget. Ten widgets ship:
+greeting, weather, news, calendar, mail, commute, this machine, timers and alarms, what
+the cameras saw, and a standing note. A widget is one `register(Widget(...))` call
+reusing `registry.Field`, so the client renders its form with no client work, the same
+bargain devices and integrations already make.
+
+The weather widget takes Home, Work, where you are standing, or a place you name. The
+news widget takes World, your region, or a topic, and a list of preferred outlets from
+SRF, 20 Minuten, Blick, NZZ, Tages-Anzeiger, Watson, SwissInfo, RTS, Le Temps, Luzerner
+Zeitung, Reuters, BBC, AP, the Guardian, Al Jazeera, DW, France 24, NYT, the FT and
+Bloomberg. Chosen outlets are searched with `site:` **as well as** an unrestricted
+search, and the two are merged: restricting to an outlet that published nothing today
+must not empty the section, which is exactly the failure that made the Swiss half
+vanish in the first place.
+
+### The prompt is built section by section
+
+This is the load-bearing part. §54 fixed the flat wall of notes by asking for every
+section; that made the model invent an appointment with the local council. Each section
+now carries its own instruction and its own budget:
+
+    SECTION 2 - Weather (write 2 sentences).
+    Weather in Oetwil am See: ...
+
+with the rule stated in both directions: a section that is here must not be dropped, a
+subject that is not here must not be mentioned at all.
+
+Widgets are gathered concurrently. Sequentially, a briefing was the sum of a weather
+lookup, four searches, a CalDAV report and an IMAP login.
+
+### Scheduling
+
+One loop for every briefing, ticking each minute, firing on *past due* rather than *at*
+so a machine asleep at 07:00 still briefs when it wakes. A period key
+(`%Y%m%d`, ISO week, or `%Y%m`) held in Redis is what stops that becoming a briefing a
+minute, and it is written **before** composing, because composing takes twenty seconds
+and a crash halfway through must not deliver twice.
+
+`proactive.py` keeps only delivery and quiet hours. The five `proactive.*` section
+booleans are gone: widgets are the single source of truth, and two of them would drift.
+An existing install's settings are read once when the Default Briefing is seeded, so
+the briefing it had is the briefing it keeps.
+
+### Automations
+
+`api/rules.py`, the other half of Phase 7. Five triggers: mail matching a description
+arrives, the weather turns, an appointment is close (optionally with the journey to
+it), a camera saw something, this machine is unwell. Each check returns facts and a
+**dedupe key**, because a trigger is a check rather than an event queue and without the
+key it fires on every poll. Checks run concurrently with `return_exceptions=True`: a
+mailbox that has stopped answering must not stop the weather rule. `POST /rules/{id}/test`
+runs a check and reports what it would have said without delivering or consuming the key.
+
+### The tool library
+
+`api/toolkit.py`. Only overrides are stored, never a copy of the declaration, so a tool
+whose wording improves in a later version is not frozen at whatever was stored the
+first time the page was opened. The Tools section shows every tool grouped, with its
+real instructions, its trigger words, and what each argument means, all editable.
+Saving an edit opens a modal saying plainly that this can stop the tool being chosen or
+make it be called with the wrong values; Reset is one click and needs no confirmation,
+because making the undo hard would be backwards.
+
+Argument *descriptions* are editable; types, names and required-ness are not. An
+argument the model is told to fill but the function does not take is not a
+customisation, it is a crash.
+
+Tool selection now records **why** each tool was offered (`matched "rain"`, `closest
+match for this message (0.71)`, `always available`), which travels to the banner and
+into the stored transcript. When the routing misfires there was previously nothing to
+look at.
+
+### Everything else in this change
+
+- **Attachments are read once.** A sidecar `<file>.iris.json` keyed on size and mtime
+  holds the transcript, the scenery and the extracted text. A follow-up question about
+  a seven minute video went from 13.8 seconds to 0.000.
+- **Speaker labels.** SpeechBrain ECAPA embeddings clustered over Whisper's segments,
+  on the CPU always. The threshold was **measured, not guessed**: on a seven minute
+  recording of one person, 0.30 split him into fourteen speakers, 0.40 into five, 0.50
+  into two and 0.60 into one. At 0.60 a genuine two-voice recording is still separated
+  correctly and each speaker re-identified across turns. Three version pins were needed
+  (torch, torchaudio, huggingface_hub) for breaks that only surface at the first
+  transcription. Diarization failing never fails a transcription; the reason is
+  reported. Speaker identity cannot survive chunking, so files under fifteen minutes go
+  over in one request and longer ones say the numbering restarts per part.
+- **Audio is a first-class upload.** `.mp3`, `.m4a`, `.wav`, `.ogg`, `.opus`, `.flac`
+  and friends. `.webm`, `.ogg` and `.mkv` are genuinely ambiguous, so the stored file is
+  probed with ffprobe rather than guessed from the extension.
+- **A transcript beside the recording.** `GET /files/media/{name}` serves uploads with
+  HTTP Range support, because without it a browser plays from the start and refuses to
+  seek, which makes a clickable transcript useless.
+- **Camera events over MQTT.** `api/events.py` subscribes to `frigate/events`, which
+  had been idle since Phase 0. Built and verified with **no camera configured**: a
+  synthetic event published to the broker flows through to "person at the front door at
+  Wed 19:06, still going."
+- **Timers and alarms.** In Postgres, so they survive a restart. The scheduler ticks
+  every five seconds, because a twenty minute timer going off at twenty minutes fifty
+  is a broken timer. `api/chime.py` synthesises the warm chime in pure Python: five
+  inharmonic bell partials, higher ones decaying faster, three descending strikes. Its
+  own self-check caught the first attempt stopping while the bell was still at a third
+  of its amplitude, which is a sound cut off rather than one that decays.
+- **Export, retry and edit.** `GET /chat/conversations/{id}/export` returns Markdown
+  with the tool turns folded in, because half of what IRiS did in a conversation is
+  what it looked up. Retry and edit are one server-side `rewind`, so the stored
+  transcript and what the model sees cannot drift.
+- **A stale position is said out loud**, with a refresh beside it. The threshold is a
+  setting.
+
+### What the browser check caught
+
+The Customize tab rendered nothing. `showView` had the hook, but the tab strip has its
+own click handler that duplicates `showView`'s body rather than calling it, so the hook
+never ran. Worth recording because the duplication is still there and the next tab
+added will hit it too.

@@ -47,6 +47,12 @@ settings.setting(
                 "what matters.")
 
 
+def snapshot_url(event_id: str) -> str:
+    """The still Frigate kept for one event. Built rather than read off the message,
+    because Frigate publishes whether a snapshot exists but not where it is."""
+    return f"{FRIGATE_URL}/api/events/{event_id}/snapshot.jpg"
+
+
 def slug(name: str) -> str:
     """Frigate camera keys must be identifier-safe; 'front door' is not."""
     return re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()).strip("_") or "camera"

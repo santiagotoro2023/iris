@@ -534,3 +534,115 @@ button { font: inherit; color: inherit; }
 .chip.pending .chip-x { margin-left: .1rem; }
 
 .chip-size { font-family: var(--mono); font-size: .62rem; color: var(--dim); }
+
+/* ------------------------------------------------------------ customize -- */
+/* A rail of sections beside a pane. On a phone the rail becomes a scrolling row of
+   chips above it, because a sidebar on a 390px screen is most of the screen. */
+.cz-shell { display: grid; grid-template-columns: 12rem 1fr; gap: 1.1rem;
+            align-items: start; }
+.cz-rail { display: flex; flex-direction: column; border: 1px solid var(--line);
+           background: var(--panel); position: sticky; top: .5rem; }
+.cz-rail-item { background: none; border: 0; border-left: 2px solid transparent;
+                color: var(--dim); font: inherit; font-size: .85rem; text-align: left;
+                padding: .6rem .8rem; cursor: pointer; }
+.cz-rail-item:hover { color: var(--text); }
+.cz-rail-item[aria-current="true"] { color: var(--orange); background: var(--panel-2);
+                                     border-left-color: var(--orange); }
+.cz-pane { min-width: 0; }
+
+.cz-explain { font-size: .78rem; color: var(--dim); line-height: 1.6;
+              padding: .8rem .9rem; border-bottom: 1px solid var(--line); }
+.cz-subhead { font-family: var(--mono); font-size: .64rem; letter-spacing: .16em;
+              text-transform: uppercase; color: var(--dim); margin: 1rem 0 .5rem; }
+.cz-group { font-family: var(--mono); font-size: .64rem; letter-spacing: .16em;
+            text-transform: uppercase; color: var(--dim); padding: .9rem .9rem .3rem;
+            border-top: 1px solid var(--line); }
+.cz-badge { font-family: var(--mono); font-size: .6rem; letter-spacing: .1em;
+            text-transform: uppercase; color: var(--dim); border: 1px solid var(--line);
+            padding: .1rem .35rem; }
+.cz-badge.edited { color: var(--orange); border-color: var(--orange); }
+.cz-fields > .thing-field:last-child { margin-bottom: 0; }
+
+/* Day and delivery pickers: several independent on/off choices, which a Combo
+   cannot express and a row of checkboxes would look nothing like the rest of this. */
+.cz-days { display: flex; flex-wrap: wrap; gap: .3rem; }
+.cz-day { background: #0b0c0e; border: 1px solid var(--line); color: var(--dim);
+          font: inherit; font-size: .78rem; padding: .35rem .6rem; cursor: pointer; }
+.cz-day:hover { border-color: var(--line-2); color: var(--text); }
+.cz-day.on { border-color: var(--orange); color: var(--orange);
+             background: var(--panel-2); }
+
+/* The widget list. Dragging moves a row; the arrows do the same for a keyboard. */
+.cz-widget-list { border: 1px solid var(--line); background: #0b0c0e; }
+.cz-widget { border-bottom: 1px solid var(--line); }
+.cz-widget:last-child { border-bottom: 0; }
+.cz-widget.dragging { opacity: .4; }
+.cz-widget.over { box-shadow: inset 0 2px 0 var(--orange); }
+.cz-widget-head { display: flex; align-items: center; gap: .5rem; padding: .5rem .6rem;
+                  flex-wrap: wrap; }
+.cz-grip { font-family: var(--mono); color: var(--line-2); cursor: grab;
+           letter-spacing: -2px; }
+.cz-widget-name { font-size: .88rem; }
+.cz-count { display: flex; align-items: center; gap: .4rem; }
+.cz-count .desc { margin: 0; white-space: nowrap; }
+.cz-count .stepper { width: 6.5rem; }
+.cz-widget-body { padding: 0 .6rem .7rem 1.6rem; }
+.spacer { flex: 1; }
+
+.cz-tool-name { background: none; border: 0; color: var(--text); font: inherit;
+                font-size: .9rem; padding: 0; cursor: pointer; text-align: left; }
+.cz-tool-name:hover { color: var(--orange); }
+.cz-tool-body { border-top: 1px solid var(--line); margin-top: .6rem;
+                padding-top: .7rem; }
+
+.btn.danger { background: var(--err); color: #14161a; }
+
+@media (max-width: 720px) {
+  .cz-shell { grid-template-columns: 1fr; }
+  .cz-rail { flex-direction: row; overflow-x: auto; position: static; }
+  .cz-rail-item { border-left: 0; border-bottom: 2px solid transparent;
+                  white-space: nowrap; }
+  .cz-rail-item[aria-current="true"] { border-left: 0;
+                                       border-bottom-color: var(--orange); }
+  .cz-widget-body { padding-left: .6rem; }
+}
+
+/* ------------------------------------------------- chat: the new controls -- */
+/* Out of the way until wanted: the export button sits over the log's top right and
+   the per-message actions only appear on hover or keyboard focus. */
+.chat-main { position: relative; }
+.chat-export { position: absolute; top: .4rem; right: .6rem; z-index: 2;
+               background: var(--panel); }
+
+.msg-acts { display: flex; gap: .4rem; margin-top: .35rem; opacity: 0;
+            transition: opacity .12s ease; }
+.msg:hover .msg-acts, .msg:focus-within .msg-acts { opacity: 1; }
+.msg-act { background: none; border: 1px solid var(--line); color: var(--dim);
+           font-family: var(--mono); font-size: .64rem; letter-spacing: .1em;
+           text-transform: uppercase; padding: .18rem .45rem; cursor: pointer; }
+.msg-act:hover { color: var(--orange); border-color: var(--orange); }
+.msg-act:disabled { opacity: .5; cursor: not-allowed; }
+
+.tool-why { font-family: var(--mono); font-size: .66rem; color: var(--dim);
+            padding-bottom: .4rem; border-bottom: 1px solid var(--line);
+            margin-bottom: .5rem; }
+
+.timer-strip { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0 0 .5rem; }
+
+/* A recording beside its own transcript. Clicking a line seeks the player. */
+.transcript-wrap { margin-top: .4rem; }
+.transcript { border: 1px solid var(--line); background: #0b0c0e; padding: .6rem;
+              margin-top: .4rem; }
+.transcript-player { width: 100%; max-height: 40vh; background: #000; }
+.transcript-lines { max-height: 16rem; overflow-y: auto; margin-top: .5rem; }
+.transcript-line { display: flex; gap: .5rem; width: 100%; text-align: left;
+                   background: none; border: 0; color: var(--text); font: inherit;
+                   font-size: .82rem; padding: .22rem .3rem; cursor: pointer;
+                   line-height: 1.5; }
+.transcript-line:hover { background: var(--panel-2); }
+.transcript-line.on { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--orange); }
+.transcript-at { font-family: var(--mono); font-size: .68rem; color: var(--dim);
+                 flex: none; padding-top: .12rem; }
+.transcript-who { font-family: var(--mono); font-size: .68rem; color: var(--orange);
+                  flex: none; padding-top: .12rem; }
+.desc.err { color: var(--err); }

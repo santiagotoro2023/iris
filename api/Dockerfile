@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir \
       fastapi==0.115.6 httpx==0.28.1 \
       "psycopg[binary]==3.2.3" jsonschema==4.23.0 redis==5.2.1 \
       python-multipart==0.0.20 pypdf==5.1.0 python-docx==1.1.2 pillow==11.0.0 \
+      paho-mqtt==2.1.0 \
       "uvicorn[standard]==0.34.0"   # [standard] carries the WebSocket protocol
 
 # Wake word detection (SPEC.md Phase 2). openWakeWord 0.6.0 declares a hard

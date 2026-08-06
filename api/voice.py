@@ -291,7 +291,8 @@ async def speak(body: SpeakRequest, user: dict = Depends(auth.active_user)):
 
 async def transcribe_bytes(data: bytes, filename: str = "audio.webm",
                            content_type: str = "audio/webm",
-                           timeout: float = 300, timestamps: bool = False) -> dict:
+                           timeout: float = 300, timestamps: bool = False,
+                           diarize: bool = False) -> dict:
     """One transcription path for the mic button and the hands-free listener alike,
     so the configured model, language and idle-unload apply identically to both.
 
@@ -308,6 +309,7 @@ async def transcribe_bytes(data: bytes, filename: str = "audio.webm",
         "vad": str(settings.get("voice.vad")).lower(),
         "idle_unload": str(settings.get("voice.stt_idle_unload")),
         "timestamps": str(timestamps).lower(),
+        "diarize": str(diarize).lower(),
     }
     try:
         # Model loads can take a while on first use or after a settings change.

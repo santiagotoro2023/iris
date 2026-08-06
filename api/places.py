@@ -69,6 +69,12 @@ settings.setting(
     title="Location taken at", order=88,
     description="When the last fix arrived, as a timestamp.")
 settings.setting(
+    "location.max_age_minutes", type="integer", minimum=1, maximum=1440, default=10,
+    title="Treat a location fix as stale after (minutes)", order=89,
+    description="Past this, IRiS says the position is old rather than quietly using "
+                "it. A machine without GPS positions itself by wifi, and a fix from "
+                "this morning is a different town by the afternoon.")
+settings.setting(
     "location.region", type="string", default="Switzerland",
     title="Where to search", order=87,
     description="Used only when nothing more precise is known.")
@@ -397,13 +403,23 @@ def fix_age_seconds() -> float | None:
     return (time.time() - taken) if taken else None
 
 
+def is_stale() -> bool:
+    """A fix past its useful life. The browser refreshes before each message, so an
+    old timestamp means the refresh failed or was refused, not that nothing moved."""
+    age = fix_age_seconds()
+    if age is None:
+        return bool(_fixed_coordinates())      # coordinates with no timestamp
+    return age > settings.get("location.max_age_minutes") * 60
+
+
 def _fix_note() -> str:
     """Said out loud when the position is old or coarse, so a wrong stop is
     explained rather than mysterious."""
     age = fix_age_seconds()
     accuracy = settings.get("location.accuracy")
+    limit = settings.get("location.max_age_minutes") * 60
     bits = []
-    if age is not None and age > 600:
+    if age is not None and age > limit:
         bits.append(f"the fix is {int(age // 60)} minutes old")
     elif age is None:
         bits.append("the fix has no timestamp, so it may be old")
